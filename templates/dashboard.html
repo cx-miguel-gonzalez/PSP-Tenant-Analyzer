@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Overview - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Overview</h1>
+  <p class="page-subtitle">Snapshot of the last sync for each section, and the latest analysis of the tenant's configuration.</p>
+</div>
+
+<form method="post" action="{{ url_for('set_look_back') }}" class="look-back-bar">
+  <label class="field-label look-back-label">Look Back
+    <select name="look_back_days" class="select-input">
+      {% for days, label in look_back_options %}
+      <option value="{{ days }}"{% if days == look_back_days %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="btn btn-outline">Save</button>
+  <span class="section-note">How far back Scan Health syncs scan history, and the "no scan within" window for Stale Projects and the analyzer's stale-project rule.</span>
+</form>
+
+<div class="card-grid">
+  {% for s in sections %}
+    {% set meta = sync_meta.get(s.key) %}
+    <a class="summary-card" href="{{ url_for('section', key=s.key) }}">
+      <div class="summary-card-icon">{{ s.icon | safe }}</div>
+      <div class="summary-card-body">
+        <h3>{{ s.label }}</h3>
+        {% if meta and meta.last_synced_at %}
+          <span class="badge badge-{{ meta.status }}">{{ meta.status }}</span>
+          <p class="summary-meta">{{ meta.record_count }} record(s) &middot; synced {{ meta.last_synced_at[:19].replace('T', ' ') }} UTC</p>
+        {% else %}
+          <span class="badge badge-idle">not yet synced</span>
+        {% endif %}
+      </div>
+    </a>
+  {% endfor %}
+</div>
+
+<form method="post" action="{{ url_for('analyze_tenant') }}" class="toolbar-row">
+  <button type="submit" class="btn btn-accent">Analyze Tenant Configurations</button>
+  <span class="section-note analyze-note">Evaluates the enabled rules in <a href="{{ url_for('analyzer_config') }}">Analyzer Config</a> against the synced data.</span>
+</form>
+
+<div class="section-block" id="analyzer-results">
+  <h2>Analyzer Results</h2>
+  {% if analyzer_report %}
+    {% set t = analyzer_report.totals %}
+    <p class="section-note">
+      Last updated {{ analyzer_report.ran_at[:19].replace('T', ' ') }} UTC &middot;
+      {{ t.violations }} rule(s) violated ({{ t.instances }} instance(s)) &middot;
+      {{ t.passed }} passed &middot; {{ t.disabled }} disabled{% if t.not_evaluated %} &middot; {{ t.not_evaluated }} not evaluated{% endif %}.
+      Re-run after syncing to refresh.
+      <a href="{{ url_for('tenant_recommendations') }}">View Tenant Recommendations &rarr;</a>
+    </p>
+    {% for s in analyzer_report.sections %}
+    <div class="analyzer-section">
+      <h3>{{ s.label }}</h3>
+      {% if s.ran_at and s.ran_at != analyzer_report.ran_at %}
+        <p class="section-note">Analyzed {{ s.ran_at[:19].replace('T', ' ') }} UTC</p>
+      {% endif %}
+      {% if s.not_run %}
+        <p class="empty-state">Not analyzed yet.</p>
+      {% elif s.violations %}
+        {% for v in s.violations %}
+        <details class="analyzer-violation sev-border-{{ v.warning_level|lower }}">
+          <summary>
+            <span class="sev-chip sev-{{ v.warning_level|lower }}">{{ v.warning_level }}</span>
+            <span class="analyzer-rule">{{ v.rule_check }}</span>
+            <span class="section-note">{{ v.instances|length }} instance(s)</span>
+          </summary>
+          <p class="section-note">{{ v.reasoning }}</p>
+          {% if v.summary %}<p class="analyzer-summary">{{ v.summary }}</p>{% endif %}
+          {% with instances = v.instances %}{% include "_instance_list.html" %}{% endwith %}
+        </details>
+        {% endfor %}
+      {% elif s.unsynced %}
+        <p class="empty-state">{{ s.skipped_unsynced }} rule(s) not evaluated &mdash; sync {{ s.unsynced|join(' and ') }} first.</p>
+      {% else %}
+        <p class="empty-state">No Configuration Warnings Detected.</p>
+      {% endif %}
+      {% for n in s.not_evaluated %}
+        <p class="section-note">Not evaluated: {{ n.rule_check }} &mdash; {{ n.reason }}</p>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty-state">The tenant hasn't been analyzed yet. Sync the sections above, then click "Analyze Tenant Configurations".</p>
+  {% endif %}
+</div>
+{% endblock %}

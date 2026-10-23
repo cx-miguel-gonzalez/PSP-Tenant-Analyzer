@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% set page_title = ("Update Preset: " ~ preset_name) if existing else ("Create New Preset: " ~ preset_name) %}
+{% block title %}{{ page_title if not existing_is_builtin else "Name Conflict" }} - Tenant Analyzer{% endblock %}
+{% block content %}
+
+{% if existing_is_builtin %}
+<div class="page-header">
+  <h1>Name Conflict</h1>
+</div>
+<div class="warning-banner">
+  <p><strong>"{{ preset_name }}" is a Built-in preset and cannot be updated.</strong>
+  Built-in presets can't be modified through the API. Choose a different name below to create a
+  new preset instead.</p>
+</div>
+
+<div class="section-block section-block-narrow">
+  <form method="post" action="{{ url_for('presets_compare_combine_confirm') }}">
+    <label class="field-label">Preset name
+      <input type="text" name="preset_name" value="{{ preset_name }}" required>
+    </label>
+    <label class="field-label">Description
+      <textarea name="description" rows="2">{{ description }}</textarea>
+    </label>
+    <input type="hidden" name="queries_json" value='{{ queries_json }}'>
+    <input type="hidden" name="a_id" value="{{ a_id }}">
+    <input type="hidden" name="b_id" value="{{ b_id }}">
+    <div class="button-row">
+      <button type="submit" class="btn btn-accent">Continue</button>
+      <a class="btn btn-outline" href="{{ url_for('presets_compare', a=a_id, b=b_id) }}">Back to compare</a>
+      <a class="btn btn-outline" href="{{ url_for('section', key='preset_management') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% else %}
+
+<div class="page-header">
+  <h1>{{ page_title }}</h1>
+</div>
+
+{% if existing %}
+<div class="warning-banner">
+  <p><strong>Warning:</strong> a preset named "{{ existing.name }}" already exists.
+  Continuing will <strong>update</strong> that preset (id {{ existing.id }}) rather than create a new one.</p>
+</div>
+{% else %}
+<div class="section-block">
+  <p class="section-note">No existing preset matches this name &mdash; a <strong>new</strong> preset will be created.</p>
+</div>
+{% endif %}
+
+<div class="section-block">
+  <p>Total queries: {{ total_queries }}</p>
+  <h3>Exact {{ 'PATCH' if existing else 'POST' }} payload</h3>
+  <pre class="raw-json code-block">{{ payload_json }}</pre>
+
+  <form method="post" action="{{ url_for('presets_compare_combine_apply') }}">
+    <input type="hidden" name="preset_name" value="{{ preset_name }}">
+    <input type="hidden" name="description" value="{{ description }}">
+    <input type="hidden" name="queries_json" value='{{ queries_json }}'>
+    {% if existing %}<input type="hidden" name="target_preset_id" value="{{ existing.id }}">{% endif %}
+    <div class="button-row">
+      <button type="submit" class="btn btn-accent">Push Changes</button>
+      <a class="btn btn-outline" href="{{ url_for('section', key='preset_management') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

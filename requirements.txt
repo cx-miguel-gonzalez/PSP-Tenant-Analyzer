@@ -1,0 +1,5 @@
+Flask>=3.0
+requests>=2.31
+python-dotenv>=1.0
+# Pinned to a release verified on Python 3.9; reportlab 5.x requires 3.10+.
+reportlab>=4.2,<4.3

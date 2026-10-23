@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Combine Presets - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Combine and Preview</h1>
+  <p class="section-note">
+    Combined from <strong>{{ preset_a.name }}</strong> (Base) and <strong>{{ preset_b.name }}</strong>
+    (Target) &mdash; {{ total_queries }} queries selected.
+  </p>
+</div>
+
+<div class="section-block section-block-narrow">
+  <form method="post" action="{{ url_for('presets_compare_combine_confirm') }}">
+    <label class="field-label">Preset name
+      <input type="text" name="preset_name" value="{{ suggested_name }}" required>
+    </label>
+    <label class="field-label">Description
+      <textarea name="description" rows="2">{{ suggested_description }}</textarea>
+    </label>
+    <input type="hidden" name="queries_json" value='{{ queries_json }}'>
+    <input type="hidden" name="a_id" value="{{ a_id }}">
+    <input type="hidden" name="b_id" value="{{ b_id }}">
+    <div class="button-row">
+      <button type="submit" class="btn btn-accent">Continue</button>
+      <button type="submit" class="btn btn-outline" formaction="{{ url_for('presets_compare_combine_export_csv') }}" formmethod="post">Export queries as CSV</button>
+      <a class="btn btn-outline" href="{{ url_for('presets_compare', a=preset_a.id, b=preset_b.id) }}">Back to compare</a>
+    </div>
+  </form>
+</div>
+
+{% if not groups %}
+  <div class="section-block"><p class="empty-state">No queries selected.</p></div>
+{% else %}
+  {% for language, categories in groups.items() %}
+  {% set lang_ns = namespace(count=0) %}
+  {% for category, names in categories.items() %}{% set lang_ns.count = lang_ns.count + names|length %}{% endfor %}
+  <details class="category-block">
+    <summary class="category-summary">
+      <span>{{ language }}</span>
+      <span class="badge badge-idle">{{ lang_ns.count }} {{ 'query' if lang_ns.count == 1 else 'queries' }}</span>
+    </summary>
+    <div class="category-body">
+      {% for category, names in categories.items() %}
+      <details class="category-block category-block-nested">
+        <summary class="category-summary">
+          <span>{{ category }}</span>
+          <span class="badge badge-idle">{{ names|length }} {{ 'query' if names|length == 1 else 'queries' }}</span>
+        </summary>
+        <ul class="plain-list">{% for name in names %}<li>{{ name }}</li>{% endfor %}</ul>
+      </details>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+{% endif %}
+{% endblock %}

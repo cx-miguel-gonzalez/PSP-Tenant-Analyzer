@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Update {{ meta.name }} - Tenant Analyzer{% endblock %}
+{% block content %}
+<a class="btn btn-outline" href="{{ url_for('section', key='preset_management') }}">&larr; Back to Presets</a>
+
+<div class="page-header">
+  <h1>Update Preset: {{ meta.name }}</h1>
+  <p class="section-note">{{ total_queries }} queries currently selected.</p>
+</div>
+
+{% if not meta.is_custom %}
+<div class="warning-banner">
+  <p><strong>Built-in presets cannot be modified.</strong> Continuing will create a <strong>new</strong>
+  preset containing your selected queries instead of changing this one. You'll be asked to name the new
+  preset below.</p>
+</div>
+{% endif %}
+
+<form method="post" id="update-preset-form">
+  <div class="section-block section-block-narrow">
+    {% if not meta.is_custom %}
+    <label class="field-label">New Preset Name
+      <input type="text" name="new_preset_name" required placeholder="Name for the new preset">
+    </label>
+    {% endif %}
+    <label class="field-label">Description
+      <textarea name="description" rows="2">{{ meta.description or '' }}</textarea>
+    </label>
+  </div>
+
+  <div class="page-header">
+    <label class="checkbox-inline"><input type="checkbox" id="update-select-all"><span>Select all</span></label>
+    <button type="submit" class="btn btn-accent">Preview changes</button>
+  </div>
+
+  {% if not catalog %}
+  <div class="section-block"><p class="empty-state">No queries in the local query catalog yet. Use "Refresh Query Catalog" on the Presets page first.</p></div>
+  {% endif %}
+
+  {% for language, categories in catalog.items() %}
+  <details class="category-block">
+    <summary class="category-summary"><span>{{ language }}</span><span class="badge badge-idle update-count"></span></summary>
+    <div class="category-body">
+      {% for category, queries in categories.items() %}
+      <details class="category-block category-block-nested">
+        <summary class="category-summary"><span>{{ category }}</span><span class="badge badge-idle update-count"></span></summary>
+        <ul class="checkbox-list">
+          {% for q in queries %}
+          <li><label class="checkbox-inline">
+            <input type="checkbox" class="update-checkbox" name="selected_query_ids" value="{{ q.queryId }}" {% if q.queryId in current_ids %}checked{% endif %}>
+            <span>{{ q.name }}</span>
+          </label></li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+</form>
+{% endblock %}

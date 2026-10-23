@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ section.label }} - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+<div class="section-block">
+  {% if rows %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          {% for field, label in columns %}<th>{{ label }}</th>{% endfor %}
+          <th>Raw</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for field, label in columns %}
+            <td>{% if field in ("is_custom", "enabled") %}{{ row[field] | yesno }}{% else %}{{ row[field] }}{% endif %}</td>
+          {% endfor %}
+          <td>
+            <details>
+              <summary>view</summary>
+              <pre class="raw-json">{{ row["raw_json"] }}</pre>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty-state">No data cached yet. Click "Sync Now" above to pull from the tenant.</p>
+  {% endif %}
+</div>
+{% endblock %}

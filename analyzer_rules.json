@@ -1,0 +1,252 @@
+{
+  "Global Configuration": [
+    {
+      "ruleCheck": "Ai Allow usage is set to false",
+      "reasoning": "Unable to use FAE, LLM Scanning, or Triage/Remediation Assist Features",
+      "warningLevel": "Medium",
+      "recommendation": "Set Allow AI Usage to true in the tenant's global configuration so AI features such as Findings Analysis, LLM scanning, and Triage/Remediation Assist can be used."
+    },
+    {
+      "ruleCheck": "Applications Direct Associations not set",
+      "reasoning": "Need to make a decision to enforce projects are associated to an application",
+      "warningLevel": "Low",
+      "recommendation": "Decide whether every project must be associated to an application, then set Applications Direct Associations so that decision is enforced consistently."
+    },
+    {
+      "ruleCheck": "General Source Code Management enabled",
+      "reasoning": "No source code is stored on Checkmarx. View code snippets and results will be very difficult",
+      "warningLevel": "High",
+      "recommendation": "Set Source Code Management to keep source code (keepAllSourceCode) so code snippets and result context stay viewable in Checkmarx One."
+    },
+    {
+      "ruleCheck": "Plugins Ide Scans set to false",
+      "reasoning": "Developers not allowed to scan from their IDE",
+      "warningLevel": "Low",
+      "recommendation": "Enable IDE Scans in the plugin settings so developers can scan from their IDE."
+    },
+    {
+      "ruleCheck": "AI Options set to false",
+      "reasoning": "Dev Assist and AI Security Champion Disabled",
+      "warningLevel": "Medium",
+      "recommendation": "Enable AI Options in the plugin settings to turn on Developer Assist and the AI Security Champion."
+    },
+    {
+      "ruleCheck": "AI MCP Server set to false",
+      "reasoning": "Dev Assist is disabled",
+      "warningLevel": "Medium",
+      "recommendation": "Enable the AI MCP Server in the plugin settings so Developer Assist is available."
+    },
+    {
+      "ruleCheck": "AI Guided Remediation set to false",
+      "reasoning": "AI Security Champion set to false",
+      "warningLevel": "Low",
+      "recommendation": "Enable AI Guided Remediation in the plugin settings to turn on the AI Security Champion."
+    },
+    {
+      "ruleCheck": "SAST Findings Analysis is set to false",
+      "reasoning": "Findings Analysis is disabled so false positives are not being eliminated",
+      "warningLevel": "High",
+      "recommendation": "Enable SAST Findings Analysis so likely false positives are identified and eliminated automatically."
+    },
+    {
+      "ruleCheck": "SAST Extended Analysis is set to false",
+      "reasoning": "The LLM Scan is not enabled which means you are not getting full coverage for language support",
+      "warningLevel": "Medium",
+      "recommendation": "Enable SAST Extended Analysis so the LLM scan extends language coverage beyond the core SAST engine."
+    },
+    {
+      "ruleCheck": "SAST Language Mode is set to Primary",
+      "reasoning": "For projects that have multiple primary languages, secondary primary languages are being ignored and not scanned",
+      "warningLevel": "High",
+      "recommendation": "Set SAST Language Mode to multi so every primary language in a multi-language project is scanned."
+    },
+    {
+      "ruleCheck": "SAST Incremental Scans is set to false",
+      "reasoning": "Incremental scans are disabled so every scan analyzes the entire code base, which increases scanned LOC and scan time.",
+      "warningLevel": "Medium",
+      "recommendation": "Enable SAST Incremental Scans so scans analyze only changed code, reducing scanned LOC and scan time."
+    },
+    {
+      "ruleCheck": "Mandatory Comment When Changing State is set to false",
+      "reasoning": "It is best practice to always leave a comment when changing the result state of a vulnerability. This should be enforced.",
+      "warningLevel": "High",
+      "recommendation": "Enable Mandatory Comment When Changing State so every result state change carries a justification."
+    },
+    {
+      "ruleCheck": "Preset Name is in: ASA Premium, Checkmarx Default, All",
+      "reasoning": "These presets are very large and have high number of queries enabled which could introduce noise into the scan and low priority vulnerabilities that will not be prioritized",
+      "warningLevel": "High",
+      "recommendation": "Replace the tenant's default SAST preset with a tailored preset aligned to the organization's application types and risk priorities."
+    },
+    {
+      "ruleCheck": "Recommended Exclusions is set to false",
+      "reasoning": "Unless filters are being created at the project level, it is likely that SAST is scanning test code, non production code, or even third party libraries.",
+      "warningLevel": "Medium",
+      "recommendation": "Enable Recommended Exclusions, or define project-level file filters, so test code, non-production code, and third-party libraries are excluded from SAST."
+    },
+    {
+      "ruleCheck": "KICS Preset ID contains a value",
+      "reasoning": "You are using a customized preset. This preset needs to be maintained as it will not automatically update to include net new queries or support for additional platforms.",
+      "warningLevel": "Low",
+      "recommendation": "Review the custom KICS preset regularly and add new queries and platforms, or switch back to the default KICS preset if the customization is no longer needed."
+    },
+    {
+      "ruleCheck": "SCA Exploitable Path is set to false",
+      "reasoning": "We are not correlating with the SAST scan to see if the vulnerabilities within a library are actually exploitable. Exploitable path greatly helps with prioritization of SCA vulnerabilities.",
+      "warningLevel": "High",
+      "recommendation": "Enable SCA Exploitable Path so SCA vulnerabilities are correlated with SAST results to show which ones are actually reachable."
+    }
+  ],
+  "Preset Management": [
+    {
+      "ruleCheck": "No Custom Preset",
+      "reasoning": "A customized preset is a best practice to tailor the rule set to a given application type and needs of the organization",
+      "warningLevel": "Low",
+      "recommendation": "Create at least one custom preset tailored to an application type (for example web app, API, or mobile) and the organization's needs, and assign it to the relevant projects."
+    },
+    {
+      "ruleCheck": "Mainly using ASA Premium, Checkmarx Default, or All presets",
+      "reasoning": "These presets are noisy and can cause scan time to take longer and introduce a high number of false positives for lower severity vulnerabilities",
+      "warningLevel": "High",
+      "recommendation": "Move projects off ASA Premium, Checkmarx Default, and All onto tailored presets focused on the vulnerabilities the organization will prioritize."
+    },
+    {
+      "ruleCheck": "Only using one preset",
+      "reasoning": "Presets are not one size fits all. Tailor presets to Web Apps, Mobile Apps, APIs, and different threat models.",
+      "warningLevel": "Medium",
+      "recommendation": "Create presets for the different application types and threat models (web apps, mobile apps, APIs) and assign each project the one that fits."
+    }
+  ],
+  "Scan Health": [
+    {
+      "ruleCheck": "Scan failure rate is greater than 5%",
+      "reasoning": "More than 1 in 20 scans end Failed or Partial, so results are missing or incomplete for a significant share of scans.",
+      "warningLevel": "High",
+      "recommendation": "Use the Top Error Categories on the Scan Health page to find the most common causes (e.g. repository credentials, missing branches, container images, custom query errors) and fix them at the source."
+    },
+    {
+      "ruleCheck": "Scan failure rate is between 2% and 5%",
+      "reasoning": "A noticeable share of scans end Failed or Partial, leaving gaps in the results for those projects.",
+      "warningLevel": "Medium",
+      "recommendation": "Use the Top Error Categories on the Scan Health page to find the most common causes (e.g. repository credentials, missing branches, container images, custom query errors) and fix them at the source."
+    },
+    {
+      "ruleCheck": "Scan failure rate is above 0% and below 2%",
+      "reasoning": "A small number of scans end Failed or Partial; recurring causes are worth fixing before they grow.",
+      "warningLevel": "Low",
+      "recommendation": "Use the Top Error Categories on the Scan Health page to find the most common causes (e.g. repository credentials, missing branches, container images, custom query errors) and fix them at the source."
+    }
+  ],
+  "Integrations": [
+    {
+      "ruleCheck": "Any connections using the standard GitHub Integration",
+      "reasoning": "Use the GitHub App instead. The standard integration is tied to a user account while the GitHub App follows least-privilege principles.",
+      "warningLevel": "Medium",
+      "recommendation": "Migrate these organizations to the GitHub App integration and remove the standard, user-account-based GitHub connection."
+    },
+    {
+      "ruleCheck": "Any custom scans are found",
+      "reasoning": "Indicates an external automation or process is initiating scans.",
+      "warningLevel": "Low",
+      "recommendation": "Identify the automation or process behind these scans and confirm it is approved; where possible, move it to a supported CI/CD plugin or SCM integration."
+    },
+    {
+      "ruleCheck": "No CI/CD integrations or Source Control integrations",
+      "reasoning": "Automated event-based scanning is not configured.",
+      "warningLevel": "High",
+      "recommendation": "Set up an SCM integration (for example the GitHub App) or a CI/CD plugin so scans run automatically on pushes and pull requests."
+    }
+  ],
+  "Feedback Apps": [
+    {
+      "ruleCheck": "Feedback app includes Medium, Low, or Informational severities",
+      "reasoning": "Can create excessive ticket noise.",
+      "warningLevel": "High",
+      "recommendation": "Limit the feedback app's severity filter to High and Critical (add Medium only if teams can act on it) to avoid excessive tickets."
+    },
+    {
+      "ruleCheck": "Feedback app not associated to a profile",
+      "reasoning": "Unused or misconfigured application.",
+      "warningLevel": "Medium",
+      "recommendation": "Associate the feedback app with a feedback profile, or delete it if it is no longer used."
+    },
+    {
+      "ruleCheck": "Profile has no associated apps",
+      "reasoning": "Misconfigured profile.",
+      "warningLevel": "Low",
+      "recommendation": "Add at least one feedback app to the profile, or delete the profile if it is no longer needed."
+    },
+    {
+      "ruleCheck": "Profile has no associated projects",
+      "reasoning": "Misconfigured profile.",
+      "warningLevel": "Low",
+      "recommendation": "Associate the profile with the projects that should create tickets, or delete it if it is no longer needed."
+    }
+  ],
+  "Policies": [
+    {
+      "ruleCheck": "Policy has no rules",
+      "reasoning": "Misconfigured policy.",
+      "warningLevel": "Low",
+      "recommendation": "Add rules to the policy, or delete it if it is no longer needed."
+    },
+    {
+      "ruleCheck": "Policy has no associated projects and is not default",
+      "reasoning": "Misconfigured policy.",
+      "warningLevel": "Low",
+      "recommendation": "Assign the policy to the projects it should govern, make it the default policy, or delete it if it is no longer needed."
+    },
+    {
+      "ruleCheck": "No default policy exists",
+      "reasoning": "Some projects may not have policy rules applied.",
+      "warningLevel": "Medium",
+      "recommendation": "Mark one policy as the default so every project has policy rules applied."
+    }
+  ],
+  "ProjectsApplications": [
+    {
+      "ruleCheck": "Project missing tags",
+      "reasoning": "No metadata associated with the project.",
+      "warningLevel": "Low",
+      "recommendation": "Add tags (for example team, business unit, or environment) so projects can be filtered, reported on, and governed."
+    },
+    {
+      "ruleCheck": "Project has no primary branch",
+      "reasoning": "Primary branch is required for reporting and feedback apps.",
+      "warningLevel": "High",
+      "recommendation": "Set a primary branch on each project so reporting and feedback apps work as expected."
+    },
+    {
+      "ruleCheck": "Project has no application association",
+      "reasoning": "Applications improve reporting and access management.",
+      "warningLevel": "Medium",
+      "recommendation": "Associate each project with an application, either manually or with application rules."
+    },
+    {
+      "ruleCheck": "Criticality set to 3",
+      "reasoning": "Default criticality may not reflect application importance.",
+      "warningLevel": "Low",
+      "recommendation": "Review each project's criticality and set it to reflect the application's business importance."
+    },
+    {
+      "ruleCheck": "Application has no projects associated",
+      "reasoning": "Application association is incomplete.",
+      "warningLevel": "Low",
+      "recommendation": "Add projects to the application, manually or with application rules, or delete it if it is no longer used."
+    },
+    {
+      "ruleCheck": "Application has no authorization assignments",
+      "reasoning": "Authorization may not be managed at the application level.",
+      "warningLevel": "Medium",
+      "recommendation": "Assign groups or users to the application so access is managed at the application level."
+    }
+  ],
+  "Stale Projects": [
+    {
+      "ruleCheck": "Project has not been scanned in {look_back}",
+      "reasoning": "Project results are out of date, or the project may never have been scanned, and it should be scanned or removed.",
+      "warningLevel": "Medium",
+      "recommendation": "Scan the project to bring its results up to date, or delete it if it is no longer needed."
+    }
+  ]
+}

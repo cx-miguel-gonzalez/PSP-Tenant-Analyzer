@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Global Configurations - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+{% if groups %}
+  <div class="category-toolbar">
+    <button class="btn btn-outline" type="button" id="expand-all-btn">Expand All</button>
+    <button class="btn btn-outline" type="button" id="collapse-all-btn">Collapse All</button>
+  </div>
+  {% for group in groups %}
+  <details class="category-block" open>
+    <summary class="category-summary">
+      <span>{{ group.category }}</span>
+      <span class="badge badge-idle">{{ group.rows | length }}</span>
+    </summary>
+    <table class="data-table">
+      <thead>
+        <tr><th>Rule</th><th>Value</th><th>Allow Override</th></tr>
+      </thead>
+      <tbody>
+        {% for row in group.rows %}
+        <tr{{ flag('config:' ~ row.key) }}>
+          <td>{{ row.key | humanize_key }}</td>
+          <td>{{ row.value | display_value }}</td>
+          <td>{{ row.allow_override | override_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endfor %}
+{% else %}
+  <div class="section-block">
+    <p class="empty-state">No data cached yet. Click "Sync Now" above to pull from the tenant.</p>
+  </div>
+{% endif %}
+{% endblock %}

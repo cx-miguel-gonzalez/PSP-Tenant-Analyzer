@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Compare Presets - Tenant Analyzer{% endblock %}
+{% block content %}
+<a class="btn btn-outline" href="{{ url_for('section', key='preset_management') }}">&larr; Back to Presets</a>
+
+<div class="page-header">
+  <h1>Compare Presets</h1>
+</div>
+
+<div class="section-block section-block-narrow">
+  <form method="get" action="{{ url_for('presets_compare') }}" class="compare-picker">
+    <label class="field-label">Base Preset
+      <select name="a" class="select-input">
+        <option value="">Select...</option>
+        {% for p in presets %}<option value="{{ p.id }}" {% if a_id == p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="field-label">Target Preset
+      <select name="b" class="select-input">
+        <option value="">Select...</option>
+        {% for p in presets %}<option value="{{ p.id }}" {% if b_id == p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn btn-accent">Compare</button>
+    {% if a_id and b_id %}
+    <a class="btn btn-outline" href="{{ url_for('presets_compare', a=b_id, b=a_id) }}" title="Swap Base and Target">&#8646; Swap Presets</a>
+    {% endif %}
+  </form>
+</div>
+
+{% if groups is not none %}
+  <div class="page-header">
+    <h2>{{ preset_a.name }} <span class="section-note">(Base)</span> vs {{ preset_b.name }} <span class="section-note">(Target)</span></h2>
+    <div class="button-row">
+      <a class="btn btn-outline" href="{{ url_for('presets_compare_export_csv', a=a_id, b=b_id) }}">Export diff as CSV</a>
+    </div>
+  </div>
+
+  {% if not any_differences %}
+    <div class="section-block"><p class="empty-state">These presets select the exact same set of queries.</p></div>
+  {% else %}
+  <form method="post" action="{{ url_for('presets_compare_combine') }}" id="combine-form">
+    <input type="hidden" name="a_id" value="{{ a_id }}">
+    <input type="hidden" name="b_id" value="{{ b_id }}">
+
+    <div class="page-header">
+      <label class="checkbox-inline"><input type="checkbox" id="combine-select-all"><span>Select all differences</span></label>
+      <button type="submit" class="btn btn-accent">Combine and Preview</button>
+    </div>
+
+    {% for group_key, bucket in groups.items() %}
+      {% if bucket.only_a or bucket.only_b %}
+      <div class="section-block">
+        <h3>{{ group_key[0] }} <span class="section-note">/ {{ group_key[1] }}</span></h3>
+        <div class="diff-columns">
+          <div class="diff-column">
+            <h4>Only in {{ preset_a.name }} (Base) ({{ bucket.only_a|length }})</h4>
+            <ul class="checkbox-list">
+              {% for q in bucket.only_a %}
+              <li><label class="checkbox-inline"><input type="checkbox" class="diff-checkbox" name="selected_query_ids" value="{{ q.queryId }}" checked><span>{{ q.name }}</span></label></li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="diff-column">
+            <h4>Only in {{ preset_b.name }} (Target) ({{ bucket.only_b|length }})</h4>
+            <ul class="checkbox-list">
+              {% for q in bucket.only_b %}
+              <li><label class="checkbox-inline"><input type="checkbox" class="diff-checkbox" name="selected_query_ids" value="{{ q.queryId }}"><span>{{ q.name }}</span></label></li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </form>
+  {% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Scan Health - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% set sync_extra %}
+<span class="section-note">Look Back: <strong>{{ look_back_label }}</strong> (<a href="{{ url_for('dashboard') }}">change on Overview</a>)</span>
+{% endset %}
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+<div class="section-block">
+  <h2>Scan KPIs</h2>
+  <div class="kpi-grid">
+
+    <div class="kpi-card">
+      <h3>Scans by Status</h3>
+      {% if pie_slices %}
+      <div class="pie-chart-row">
+        <div class="pie-chart" style="background: conic-gradient({% for s in pie_slices %}{{ s.color }} {{ s.start }}% {{ s.end }}%{% if not loop.last %}, {% endif %}{% endfor %});">
+          <div class="pie-chart-hole">
+            <span class="pie-chart-total">{{ total_scans }}</span>
+            <span class="pie-chart-total-label">scans</span>
+          </div>
+        </div>
+        <ul class="pie-legend">
+          {% for s in pie_slices %}
+          <li>
+            <button type="button" class="legend-item" data-status="{{ s.status }}">
+              <span class="legend-swatch" style="background: {{ s.color }};"></span>{{ s.status }} &mdash; {{ s.count }} ({{ "%.0f"|format(s.pct) }}%)
+            </button>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <p class="section-note">Click a status to see that filtered list of scans below.</p>
+      {% else %}
+        <p class="empty-state">No scans cached yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card">
+      <h3>Top Projects by Scan Failures <span class="section-note">(Failed + Partial)</span></h3>
+      {% if top_failing %}
+      <div class="bar-chart">
+        {% for row in top_failing %}
+        <button type="button" class="bar-column" data-project="{{ row.project_name or row.project_id }}">
+          <span class="bar-value">{{ row.failure_count }}</span>
+          <div class="bar" style="height: {{ (row.failure_count / max_failure_count * 100) | round(1) }}%;"></div>
+          <span class="bar-label" title="{{ row.project_name or row.project_id }}">{{ row.project_name or row.project_id }}</span>
+        </button>
+        {% endfor %}
+      </div>
+      <p class="section-note">Click a bar to see that project's failed/partial scans below.</p>
+      {% else %}
+        <p class="empty-state">No failed or partial scans found.</p>
+      {% endif %}
+    </div>
+
+    {% set te = top_errors %}
+    <div class="kpi-card kpi-card-wide">
+      <h3>Top Error Categories <span class="section-note">(from the workflows of all Failed + Partial scans)</span></h3>
+      {% if te.categories %}
+      <table class="data-table top-errors-table">
+        <thead>
+          <tr><th>#</th><th>Category</th><th>Components</th><th>Scans</th><th>Failed / Partial</th><th>Projects</th></tr>
+        </thead>
+        <tbody>
+          {% for c in te.categories %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+              <button type="button" class="link-button error-category-link" data-error-category="{{ c.category }}"
+                data-scan-ids="{{ c.scan_ids | join(' ') }}" title="Show these {{ c.scan_count }} scans below">{{ c.category }}</button>
+              <div class="section-note">{{ c.description }}</div>
+              <details class="error-category-details">
+                <summary>{{ c.errors | length }} specific error{{ '' if c.errors | length == 1 else 's' }}</summary>
+                <ul>
+                  {% for e in c.errors %}
+                  <li><span class="error-category-count">{{ e.scan_count }} scan{{ '' if e.scan_count == 1 else 's' }}</span><span class="top-error-message" title="{{ e.error }}">{{ e.error }}</span></li>
+                  {% endfor %}
+                </ul>
+              </details>
+            </td>
+            <td>{{ c.components | join(', ') }}</td>
+            <td>{{ c.scan_count }} <span class="section-note">({{ (c.scan_count / te.analyzed * 100) | round | int }}%)</span></td>
+            <td>{{ c.statuses.get('Failed', 0) }} / {{ c.statuses.get('Partial', 0) }}</td>
+            <td>{{ c.project_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="section-note">
+        Based on {{ te.analyzed }} of {{ te.failed_partial_total }} failed/partial scans.
+        Each category counts a scan once; a scan that hit more than one kind of error appears in each of those categories.
+        {% if te.without_detail %}{{ te.without_detail }} scan(s) had no error detail in their workflow.{% endif %}
+        {% if te.analyzed < te.failed_partial_total %}{{ te.failed_partial_total - te.analyzed }} workflow(s) not fetched yet &mdash; Sync Now to fetch them.{% endif %}
+      </p>
+      {% elif te.failed_partial_total and not te.analyzed %}
+        <p class="empty-state">Scan workflows haven't been fetched yet &mdash; click "Sync Now" above to fetch them for the {{ te.failed_partial_total }} failed/partial scan(s).</p>
+      {% elif te.failed_partial_total %}
+        <p class="empty-state">No error details found in the workflows of the {{ te.analyzed }} failed/partial scan(s).</p>
+      {% else %}
+        <p class="empty-state">No failed or partial scans found.</p>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card kpi-card-wide">
+      <h3>Long-Running Scans by Project <span class="section-note">(scans over 30 minutes)</span></h3>
+      {% if long_running %}
+      <table class="data-table" id="long-running-table">
+        <thead>
+          <tr><th>Project</th><th># Long-Running Scans</th><th>Longest</th><th>Average</th></tr>
+        </thead>
+        <tbody>
+          {% for row in long_running %}
+          <tr>
+            <td><button type="button" class="link-button" data-project="{{ row.project_name or row.project_id }}" data-kpi-link="long">{{ row.project_name or row.project_id }}</button></td>
+            <td>{{ row.long_scan_count }}</td>
+            <td>{{ row.max_minutes | duration_label }}</td>
+            <td>{{ row.avg_minutes | duration_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="pagination-row">
+        <span id="long-running-range-label" class="section-note"></span>
+        <div class="button-row">
+          <button type="button" id="long-running-prev" class="btn btn-outline">&larr; Previous</button>
+          <button type="button" id="long-running-next" class="btn btn-outline">Next &rarr;</button>
+        </div>
+      </div>
+      <p class="section-note">Click a project name to see its scans below, with the long-running ones highlighted.</p>
+      {% else %}
+        <p class="empty-state">No scans longer than 30 minutes found.</p>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card kpi-card-wide">
+      <h3>Inconsistent Scan Durations <span class="section-note">(highest variation, 3+ scans)</span></h3>
+      {% if inconsistent %}
+      <table class="data-table">
+        <thead>
+          <tr><th>Project</th><th>Scans</th><th>Std Dev</th><th>Min</th><th>Max</th><th>Average</th></tr>
+        </thead>
+        <tbody>
+          {% for row in inconsistent %}
+          <tr>
+            <td><button type="button" class="link-button" data-project="{{ row.project_name or row.project_id }}" data-kpi-link="variance">{{ row.project_name or row.project_id }}</button></td>
+            <td>{{ row.scan_count }}</td>
+            <td>{{ row.stdev_minutes | duration_label }}</td>
+            <td>{{ row.min_minutes | duration_label }}</td>
+            <td>{{ row.max_minutes | duration_label }}</td>
+            <td>{{ row.avg_minutes | duration_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="section-note">Click a project name to see its scans below, with longer scans highlighted red and shorter ones green (relative to that project's own average).</p>
+      {% else %}
+        <p class="empty-state">Not enough scan history yet (need at least 3 scans for the same project).</p>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<div class="section-block">
+  <h2>Status breakdown</h2>
+  {% if status_breakdown %}
+    <div class="stat-row">
+      {% for row in status_breakdown %}
+        <button type="button" class="stat-tile" data-status="{{ row.status or '' }}">
+          <span class="stat-value">{{ row.count }}</span>
+          <span class="stat-label">{{ row.status or "Unknown" }}</span>
+        </button>
+      {% endfor %}
+    </div>
+    <p class="section-note">Click a status to filter the scans below. Click it again to clear the filter.</p>
+  {% else %}
+    <p class="empty-state">No scans cached yet. Click "Sync Now" above to pull from the tenant.</p>
+  {% endif %}
+</div>
+
+<div class="section-block" id="scans-explorer">
+  <h2>Scans</h2>
+  {% if scans %}
+  <div class="toolbar-row">
+    <select id="scans-status-filter" class="select-input">
+      <option value="">All statuses</option>
+      <option value="Failed,Partial">Failed or Partial</option>
+      {% for row in status_breakdown %}
+        <option value="{{ row.status or '' }}">{{ row.status or "Unknown" }}</option>
+      {% endfor %}
+    </select>
+    <input type="search" id="scans-filter-project" class="search-input" placeholder="Filter Project...">
+    <input type="search" id="scans-filter-branch" class="search-input" placeholder="Filter Branch...">
+    <input type="search" id="scans-filter-origin" class="search-input" placeholder="Filter Origin...">
+    <input type="search" id="scans-filter-initiator" class="search-input" placeholder="Filter Initiator...">
+    <button type="button" id="scans-export-btn" class="btn btn-outline">Export CSV</button>
+  </div>
+  <p class="section-note">Export includes every scan matching the current filters above, not just the current page.</p>
+  <p id="scans-active-filter-note" class="section-note" hidden></p>
+
+  <table class="data-table" id="scans-table">
+    <thead>
+      <tr>
+        <th data-sort-key="scan_id" class="sortable">Scan ID</th>
+        <th data-sort-key="project" class="sortable">Project</th>
+        <th data-sort-key="status" class="sortable">Status</th>
+        <th data-sort-key="branch" class="sortable">Branch</th>
+        <th data-sort-key="origin" class="sortable">Origin</th>
+        <th data-sort-key="initiator" class="sortable">Initiator</th>
+        <th data-sort-key="duration_minutes" class="sortable">Duration</th>
+        <th data-sort-key="created_at" class="sortable sort-desc">Created</th>
+        <th data-sort-key="loc" class="sortable">LOC</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for scan in scans %}
+      <tr
+        data-scan_id="{{ scan.id or '' }}"
+        data-status="{{ scan.status or '' }}"
+        data-project="{{ scan.project_name or scan.project_id or '' }}"
+        data-branch="{{ scan.branch or '' }}"
+        data-origin="{{ scan.origin or '' }}"
+        data-initiator="{{ scan.initiator or '' }}"
+        data-duration_minutes="{{ scan.duration_minutes if scan.duration_minutes is not none else '' }}"
+        data-created_at="{{ scan.created_at or '' }}"
+        data-loc="{{ scan.loc if scan.loc is not none else '' }}"
+      >
+        <td>{{ scan.id }}</td>
+        <td>{{ scan.project_name or scan.project_id }}</td>
+        <td><span class="badge badge-{{ 'done' if scan.status == 'Completed' else 'warning' }}">{{ scan.status }}</span></td>
+        <td>{{ scan.branch }}</td>
+        <td>{{ scan.origin }}</td>
+        <td>{{ scan.initiator }}</td>
+        <td>{{ scan.duration_minutes | duration_label }}</td>
+        <td>{{ (scan.created_at or "")[:19].replace('T', ' ') }}</td>
+        <td>{{ "{:,}".format(scan.loc) if scan.loc is not none else "—" }}</td>
+        <td><button type="button" class="btn btn-outline btn-small workflow-btn" data-scan-id="{{ scan.id }}">Scan Workflow</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination-row">
+    <span id="scans-range-label" class="section-note"></span>
+    <div class="button-row">
+      <label class="field-label" style="margin-bottom: 0;">Page size
+        <select id="scans-page-size" class="select-input">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="250">250</option>
+          <option value="all">All</option>
+        </select>
+      </label>
+      <button type="button" id="scans-prev" class="btn btn-outline">&larr; Previous</button>
+      <button type="button" id="scans-next" class="btn btn-outline">Next &rarr;</button>
+    </div>
+  </div>
+  {% else %}
+    <p class="empty-state">No scans cached yet.</p>
+  {% endif %}
+</div>
+
+<div id="workflow-panel-backdrop" class="panel-backdrop" hidden></div>
+<aside id="workflow-panel" class="detail-panel" aria-hidden="true">
+  <div class="detail-panel-header">
+    <div>
+      <h2 id="workflow-panel-title">Scan Workflow</h2>
+      <p id="workflow-panel-meta" class="section-note"></p>
+    </div>
+    <button id="workflow-panel-close" class="btn btn-outline btn-small" type="button">Close</button>
+  </div>
+  <div id="workflow-panel-body" class="detail-panel-body"></div>
+</aside>
+{% endblock %}

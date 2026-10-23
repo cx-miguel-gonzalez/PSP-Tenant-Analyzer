@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Tenant Analyzer local SQLite cache -- never commit synced tenant data
+/data/
+
 # Environments
 .env
 .envrc

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Stale Projects - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+<div class="section-note-block">
+  <p class="section-note">
+    Derived from Project/Application Management and Scan Health data -- no sync of its own.
+    Project data: {% if project_meta and project_meta.last_synced_at %}synced {{ project_meta.last_synced_at[:19].replace('T', ' ') }} UTC{% else %}not yet synced{% endif %}.
+    Scan data: {% if scan_meta and scan_meta.last_synced_at %}synced {{ scan_meta.last_synced_at[:19].replace('T', ' ') }} UTC{% else %}not yet synced{% endif %}.
+    <br>Showing projects not scanned in {{ look_back_phrase }}
+    (Look Back: <strong>{{ look_back_label }}</strong> &mdash; change it on the <a href="{{ url_for('dashboard') }}">Overview</a>).
+  </p>
+  {% if analyzable %}{% include "_analyze_button.html" %}{% endif %}
+</div>
+
+{% include "_findings.html" %}
+
+<div class="section-block">
+  {% if stale %}
+    <div class="toolbar-row">
+      <button type="button" id="stale-projects-export-btn" class="btn btn-outline">Export CSV</button>
+    </div>
+    <table class="data-table" id="stale-projects-table">
+      <thead>
+        <tr>
+          <th data-sort-key="0" class="sortable">Project ID</th>
+          <th data-sort-key="1" class="sortable">Project</th>
+          <th data-sort-key="2" class="sortable">Criticality</th>
+          <th data-sort-key="3" class="sortable">Last Scan</th>
+          <th data-sort-key="4" class="sortable">Days Since Last Scan</th>
+          <th data-sort-key="5" class="sortable">Scan Count</th>
+        </tr>
+        <tr class="table-filter-row">
+          <th><input type="search" class="stale-project-filter" data-filter-column="0" aria-label="Filter stale projects by ID" placeholder="Filter ID"></th>
+          <th><input type="search" class="stale-project-filter" data-filter-column="1" aria-label="Filter stale projects by name" placeholder="Filter project"></th>
+          <th><input type="search" class="stale-project-filter" data-filter-column="2" aria-label="Filter stale projects by criticality" placeholder="Filter criticality"></th>
+          <th><input type="search" class="stale-project-filter" data-filter-column="3" aria-label="Filter stale projects by last scan" placeholder="Filter date"></th>
+          <th><input type="search" class="stale-project-filter" data-filter-column="4" aria-label="Filter stale projects by days since scan" placeholder="Filter days"></th>
+          <th><input type="search" class="stale-project-filter" data-filter-column="5" aria-label="Filter stale projects by scan count" placeholder="Filter count"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in stale %}
+        <tr{{ flag('project:' ~ p.id) }}>
+          <td>{{ p.id }}</td>
+          <td>{{ p.name }}</td>
+          <td>{{ p.criticality }}</td>
+          <td>{{ p.last_scan_at[:19].replace('T', ' ') if p.last_scan_at else "never scanned" }}</td>
+          <td>{{ p.days_since_last_scan if p.days_since_last_scan is not none else "-" }}</td>
+          <td>{{ p.scan_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="pagination-row">
+      <span id="stale-projects-range-label" class="section-note"></span>
+      <div class="button-row">
+        <label class="field-label" style="margin-bottom: 0;">Page size
+          <select id="stale-projects-page-size" class="select-input">
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <button type="button" id="stale-projects-prev" class="btn btn-outline">&larr; Previous</button>
+        <button type="button" id="stale-projects-next" class="btn btn-outline">Next &rarr;</button>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No stale projects found at this threshold (or Project/Scan data has not been synced yet).</p>
+  {% endif %}
+</div>
+{% endblock %}

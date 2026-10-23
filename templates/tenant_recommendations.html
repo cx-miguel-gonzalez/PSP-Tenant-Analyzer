@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Tenant Recommendations - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header page-header-actions">
+  <h1>Tenant Recommendations</h1>
+  {% if report %}<a class="btn btn-accent" href="{{ url_for('tenant_recommendations_pdf') }}">Export to PDF</a>{% endif %}
+</div>
+
+{% if report %}
+  <div class="recommendations-summary">
+    <span class="section-note">Based on the analysis updated {{ report.ran_at[:19].replace('T', ' ') }} UTC:</span>
+    <span class="sev-chip sev-high">{{ severity_counts.High }} High</span>
+    <span class="sev-chip sev-medium">{{ severity_counts.Medium }} Medium</span>
+    <span class="sev-chip sev-low">{{ severity_counts.Low }} Low</span>
+  </div>
+
+  {% for group in groups %}
+  <div class="section-block">
+    <h2>
+      {% if group.page_key %}<a class="recommendation-section-link" href="{{ url_for('section', key=group.page_key) }}">{{ group.label }}</a>{% else %}{{ group.label }}{% endif %}
+    </h2>
+    {% for f in group.findings %}
+    <div class="recommendation-card sev-border-{{ f.warning_level|lower }}">
+      <div class="recommendation-title">
+        <span class="sev-chip sev-{{ f.warning_level|lower }}">{{ f.warning_level }}</span>
+        <span class="analyzer-rule">{{ f.rule_check }}</span>
+      </div>
+      <dl class="recommendation-body">
+        <dt>Finding</dt>
+        <dd>{{ f.reasoning }}</dd>
+        {% if f.summary %}<dt>Result</dt>
+        <dd class="analyzer-summary">{{ f.summary }}</dd>{% endif %}
+        <dt>Recommendation</dt>
+        <dd>{{ f.recommendation or "—" }}</dd>
+      </dl>
+      <details class="recommendation-instances"{% if f.instances|length <= 5 %} open{% endif %}>
+        <summary>Affected ({{ f.instances|length }})</summary>
+        {% with instances = f.instances %}{% include "_instance_list.html" %}{% endwith %}
+      </details>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="section-block">
+    <p class="empty-state">No Configuration Warnings Detected.</p>
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="empty-state">Run "Analyze Tenant Configurations" on the <a href="{{ url_for('dashboard') }}">Overview</a> page to generate recommendations.</p>
+{% endif %}
+{% endblock %}

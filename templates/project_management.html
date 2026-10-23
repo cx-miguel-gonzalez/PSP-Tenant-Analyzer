@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Project/Application Management - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+{% if missing_summary_count %}
+<p class="section-note missing-summary-note">
+  {{ missing_summary_count }} project(s) have a latest completed scan with no vulnerability summary yet &mdash;
+  usually scans added by a later Scan Health sync. Click "Sync Now" above to fetch their counts.
+</p>
+{% endif %}
+
+<nav class="section-tabs" aria-label="Project management views">
+  <a class="section-tab{{ ' active' if active_tab != 'applications' else '' }}" href="{{ url_for('section', key='project_management', tab='projects') }}"{% if active_tab != 'applications' %} aria-current="page"{% endif %}>Projects</a>
+  <a class="section-tab{{ ' active' if active_tab == 'applications' else '' }}" href="{{ url_for('section', key='project_management', tab='applications') }}"{% if active_tab == 'applications' %} aria-current="page"{% endif %}>Applications</a>
+</nav>
+
+{% if active_tab == 'applications' %}
+<div class="section-block">
+  <h2>Applications</h2>
+  {% if applications %}
+    <table class="data-table" id="project-management-applications-table">
+      <thead>
+        <tr>
+          <th data-sort-key="0" class="sortable">Name</th>
+          <th data-sort-key="1" class="sortable">Project Count</th>
+          <th data-sort-key="2" class="sortable">Total Vulnerabilities</th>
+          <th data-sort-key="3" class="sortable">Authorization</th>
+        </tr>
+        <tr class="table-filter-row">
+          <th><input type="search" class="project-management-filter" data-filter-column="0" aria-label="Filter applications by name" placeholder="Filter name"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="1" aria-label="Filter applications by project count" placeholder="Filter count"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="2" aria-label="Filter applications by total vulnerabilities" placeholder="Filter vulnerabilities"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="3" aria-label="Filter applications by authorization" placeholder="Filter authorization"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in applications %}
+        <tr{{ flag('application:' ~ a.id) }}>
+          <td>{{ a.name }}</td>
+          <td>{{ (a.project_ids | from_json | length) }}</td>
+          <td>
+            {% if a.vulnerability_severity_counts is not none %}
+              <span class="metadata-chip-list">
+                {% for item in a.vulnerability_severity_counts %}<span class="feedback-chip severity-{{ item.severity|lower }}">{{ item.severity }}: {{ item.count }}</span>{% endfor %}
+              </span>
+              {% if a.vulnerability_projects_counted < a.vulnerability_projects_total %}
+                <div class="section-note vuln-coverage" title="Projects without a completed scan with results aren't included in the totals.">Based on {{ a.vulnerability_projects_counted }} of {{ a.vulnerability_projects_total }} projects</div>
+              {% endif %}
+            {% elif a.vulnerability_projects_total %}
+              <span class="section-note">No scan results for its {{ a.vulnerability_projects_total }} project(s)</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if a.authorization_values %}
+              <span class="metadata-chip-list">{% for authorization in a.authorization_values %}<span class="metadata-chip">{{ authorization }}</span>{% endfor %}</span>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="pagination-row">
+      <span id="project-management-range-label" class="section-note"></span>
+      <div class="button-row">
+        <label class="field-label" style="margin-bottom: 0;">Page size
+          <select id="project-management-page-size" class="select-input">
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <button type="button" id="project-management-prev" class="btn btn-outline">&larr; Previous</button>
+        <button type="button" id="project-management-next" class="btn btn-outline">Next &rarr;</button>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No applications cached yet.</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="section-block">
+  <h2>Projects {% if orphaned_count %}<span class="badge badge-info">{{ orphaned_count }} unassigned</span>{% endif %}</h2>
+  <p class="section-note">Vulnerability counts are from each project's latest completed scan summary.</p>
+  {% if projects %}
+    <table class="data-table" id="project-management-projects-table">
+      <thead>
+        <tr>
+          <th data-sort-key="0" class="sortable">Project Name</th>
+          <th data-sort-key="1" class="sortable">Project Id</th>
+          <th data-sort-key="2" class="sortable">Primary Branch</th>
+          <th data-sort-key="3" class="sortable">Tags</th>
+          <th data-sort-key="4" class="sortable">Applications</th>
+          <th data-sort-key="5" class="sortable">Total Vulnerabilities</th>
+          <th data-sort-key="6" class="sortable">Criticality</th>
+          <th data-sort-key="7" class="sortable">Created</th>
+        </tr>
+        <tr class="table-filter-row">
+          <th><input type="search" class="project-management-filter" data-filter-column="0" aria-label="Filter projects by name" placeholder="Filter name"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="1" aria-label="Filter projects by ID" placeholder="Filter ID"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="2" aria-label="Filter projects by primary branch" placeholder="Filter branch"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="3" aria-label="Filter projects by tags" placeholder="Filter tags"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="4" aria-label="Filter projects by application" placeholder="Filter applications"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="5" aria-label="Filter projects by vulnerability count" placeholder="Filter severity/count"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="6" aria-label="Filter projects by criticality" placeholder="Filter criticality"></th>
+          <th><input type="search" class="project-management-filter" data-filter-column="7" aria-label="Filter projects by creation date" placeholder="Filter created"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in projects %}
+        <tr{{ flag('project:' ~ p.id) }}>
+          <td>{{ p.name }}</td>
+          <td>{{ p.id }}</td>
+          <td>{{ p.primary_branch }}</td>
+          <td>
+            {% if p.tag_values %}
+              <span class="metadata-chip-list">
+                {% if p.tag_values is mapping %}
+                  {% for key, value in p.tag_values.items() %}<span class="metadata-chip">{{ key }}: {{ value }}</span>{% endfor %}
+                {% else %}
+                  {% for value in p.tag_values %}<span class="metadata-chip">{{ value }}</span>{% endfor %}
+                {% endif %}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if p.application_names %}
+              <span class="metadata-chip-list">{% for name in p.application_names %}<span class="metadata-chip">{{ name }}</span>{% endfor %}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if p.vulnerability_severity_counts %}
+              <span class="metadata-chip-list">
+                {% for item in p.vulnerability_severity_counts %}<span class="feedback-chip severity-{{ item.severity|lower }}">{{ item.severity }}: {{ item.count }}</span>{% endfor %}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ p.criticality if p.criticality is not none else "—" }}</td>
+          <td>{{ (p.created_at or "")[:19].replace('T', ' ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="pagination-row">
+      <span id="project-management-range-label" class="section-note"></span>
+      <div class="button-row">
+        <label class="field-label" style="margin-bottom: 0;">Page size
+          <select id="project-management-page-size" class="select-input">
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <button type="button" id="project-management-prev" class="btn btn-outline">&larr; Previous</button>
+        <button type="button" id="project-management-next" class="btn btn-outline">Next &rarr;</button>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No projects cached yet. Click "Sync Now" above to pull from the tenant.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

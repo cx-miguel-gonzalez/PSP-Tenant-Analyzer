@@ -1,0 +1,31 @@
+{% if analyzer_highlights and (analyzer_highlights.targets or analyzer_highlights.section_wide) %}
+<div class="analyzer-legend">
+  <p>
+    <strong>Configuration warnings</strong> &mdash; this section was last analyzed
+    {{ analyzer_highlights.ran_at[:19].replace('T', ' ') }} UTC.
+    {% if analyzer_highlights.targets %}
+      Highlighted items violate a rule:
+      <span class="sev-chip sev-high">High</span>
+      <span class="sev-chip sev-medium">Medium</span>
+      <span class="sev-chip sev-low">Low</span>
+      &mdash; hover one to see which rule(s).
+    {% endif %}
+  </p>
+  {% for w in analyzer_highlights.section_wide %}
+    <p class="analyzer-section-wide">
+      <span class="sev-chip sev-{{ w.warning_level|lower }}">{{ w.warning_level }}</span>
+      {{ w.rule_check }} &mdash; {{ w.summary if w.summary else w.details|join('; ') }}
+    </p>
+  {% endfor %}
+</div>
+{% endif %}
+{% if findings %}
+<ul class="findings-list">
+  {% for f in findings %}
+    <li class="finding finding-{{ f.severity }}">
+      <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
+      <span class="finding-message">{{ f.message }}</span>
+    </li>
+  {% endfor %}
+</ul>
+{% endif %}

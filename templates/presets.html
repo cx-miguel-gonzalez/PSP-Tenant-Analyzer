@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Preset Management - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% include "_sync_strip.html" %}
+<div class="section-note-block">
+  <p class="section-note">
+    The query catalog (languages/categories/queries) is mostly static, so a regular sync reuses the
+    cached one. Refresh it if new queries were added on the tenant.
+  </p>
+  <button class="btn btn-outline section-sync-btn" type="button" data-section-key="preset_management"
+    data-refresh-catalog="1">Refresh Query Catalog</button>
+</div>
+{% include "_findings.html" %}
+
+<div class="legend-row">
+  <span class="badge badge-idle">Built-in</span>
+  <span class="badge badge-info">Custom</span>
+</div>
+
+{% if not rows %}
+  <div class="section-block">
+    <p class="empty-state">No presets cached yet. Click "Sync Now" above to pull from the tenant.</p>
+  </div>
+{% else %}
+<div class="toolbar-row">
+  <input type="search" id="preset-search" class="search-input" placeholder="Filter by name or description...">
+  <select id="type-filter" class="select-input">
+    <option value="all">All types</option>
+    <option value="builtin">Built-in only</option>
+    <option value="custom">Custom only</option>
+  </select>
+</div>
+
+<form method="get" action="{{ url_for('presets_compare') }}" id="compare-form">
+  <input type="hidden" name="a" id="compare-input-a" value="">
+  <input type="hidden" name="b" id="compare-input-b" value="">
+  <div class="section-block section-block-flush">
+    <table class="data-table" id="presets-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th data-sort-key="name" class="sortable">Name</th>
+          <th data-sort-key="type" class="sortable">Type</th>
+          <th data-sort-key="associated_projects" class="sortable">Associated Projects</th>
+          <th data-sort-key="description" class="sortable">Description</th>
+          <th></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in rows %}
+        <tr data-name="{{ p.name }}" data-type="{{ 'custom' if p.is_custom else 'builtin' }}" data-description="{{ p.description or '' }}" data-associated_projects="{{ p.associated_projects if p.associated_projects is not none else 0 }}"{{ flag('preset:' ~ p.id) }}>
+          <td><input type="checkbox" class="compare-checkbox" data-id="{{ p.id }}"></td>
+          <td>
+            <button type="button" class="link-button preset-name-trigger" data-preset-id="{{ p.id }}">{{ p.name }}</button>
+            {% if p.is_tenant_default %}<span class="tenant-default-star" title="Tenant Default Preset">&#9733;</span>{% endif %}
+          </td>
+          <td>{% if p.is_custom %}<span class="badge badge-info">Custom</span>{% else %}<span class="badge badge-idle">Built-in</span>{% endif %}</td>
+          <td>{{ p.associated_projects if p.associated_projects is not none else 0 }}</td>
+          <td>{{ p.description or '' }}</td>
+          <td><a class="btn btn-outline btn-small" href="{{ url_for('preset_export_json', preset_id=p.id) }}">Export JSON</a></td>
+          <td><a class="btn btn-outline btn-small" href="{{ url_for('preset_update', preset_id=p.id) }}">Update</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <button type="submit" id="compare-submit-button" class="btn btn-accent" disabled>Compare selected (0/2)</button>
+  <a class="btn btn-outline" href="{{ url_for('presets_delete') }}">Delete presets</a>
+</form>
+{% endif %}
+
+<div id="preset-panel-backdrop" class="panel-backdrop" hidden></div>
+<aside id="preset-panel" class="detail-panel" aria-hidden="true">
+  <div class="detail-panel-header">
+    <div>
+      <h2 id="preset-panel-title">Preset</h2>
+      <p id="preset-panel-meta" class="section-note"></p>
+    </div>
+    <button id="preset-panel-close" class="btn btn-outline btn-small" type="button">Close</button>
+  </div>
+  <div id="preset-panel-body" class="detail-panel-body"></div>
+</aside>
+{% endblock %}

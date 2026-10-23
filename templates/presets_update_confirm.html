@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% set page_title = ("Create New Preset: " ~ target_name) if is_builtin else ("Update Preset: " ~ meta.name) %}
+{% block title %}{{ page_title }} - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ page_title }}</h1>
+</div>
+
+{% if is_builtin %}
+<div class="warning-banner">
+  <p><strong>{{ meta.name }}</strong> is a Built-in preset and cannot be modified.
+  Pushing these changes will create a <strong>new</strong> preset named "{{ target_name }}" instead.</p>
+</div>
+{% endif %}
+
+<div class="section-block">
+  <p>Current query count: {{ current_count }}</p>
+  <p>Resulting query count: {{ final_count }}</p>
+
+  <h3>Queries being added ({{ added|length }})</h3>
+  {% if added %}
+    <ul class="plain-list">{% for q in added %}<li>{{ q.name }} ({{ q.language }} / {{ q.group }})</li>{% endfor %}</ul>
+  {% else %}
+    <p class="section-note">No queries are being added.</p>
+  {% endif %}
+
+  <h3>Queries being removed ({{ removed|length }})</h3>
+  {% if removed %}
+    <ul class="plain-list">{% for q in removed %}<li>{{ q.name }} ({{ q.language }} / {{ q.group }})</li>{% endfor %}</ul>
+  {% else %}
+    <p class="section-note">No queries are being removed.</p>
+  {% endif %}
+
+  <h3>Exact {{ 'POST' if is_builtin else 'PATCH' }} payload</h3>
+  <p class="section-note">Queries are grouped by family, matching Checkmarx One's own preset-creation request shape.</p>
+  <pre class="raw-json code-block">{{ payload_json }}</pre>
+
+  <form method="post" action="{{ url_for('preset_update_confirm', preset_id=meta.id) }}">
+    <input type="hidden" name="final_by_family_json" value='{{ final_by_family_json }}'>
+    <input type="hidden" name="description" value="{{ target_description }}">
+    {% if is_builtin %}<input type="hidden" name="new_preset_name" value="{{ new_preset_name }}">{% endif %}
+    <div class="button-row">
+      <button type="submit" class="btn btn-accent">Push Changes</button>
+      <a class="btn btn-outline" href="{{ url_for('preset_update', preset_id=meta.id) }}">Back</a>
+      <a class="btn btn-outline" href="{{ url_for('section', key='preset_management') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

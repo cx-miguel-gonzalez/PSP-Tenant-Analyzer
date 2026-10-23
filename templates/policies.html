@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Policies - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <h3>Projects with the Most Violations</h3>
+    {% if project_incidents %}
+      <table class="data-table">
+        <thead><tr><th>Project</th><th>Incidents</th></tr></thead>
+        <tbody>
+          {% for project in project_incidents %}
+          <tr><td>{{ project.project_name }}</td><td>{{ project.count }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty-state">No policy violations cached.</p>
+    {% endif %}
+  </div>
+
+  <div class="kpi-card">
+    <h3>Most Violated Rules <span class="section-note">(top 10)</span></h3>
+    {% if top_violated_rules %}
+      <div class="bar-chart">
+        {% for rule in top_violated_rules %}
+        <div class="bar-column" title="{{ rule.rule_name }}: {{ rule.count }} incident(s)">
+          <span class="bar-value">{{ rule.count }}</span>
+          <div class="bar" style="height: {{ (rule.count / max_rule_incidents * 100) | round(1) }}%;"></div>
+          <span class="bar-label">{{ rule.rule_name }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">No violated rules cached.</p>
+    {% endif %}
+  </div>
+</div>
+
+<nav class="section-tabs" aria-label="Policy views">
+  <a class="section-tab{{ ' active' if active_tab != 'violations' else '' }}" href="{{ url_for('section', key='policies', tab='policies') }}"{% if active_tab != 'violations' %} aria-current="page"{% endif %}>Policies</a>
+  <a class="section-tab{{ ' active' if active_tab == 'violations' else '' }}" href="{{ url_for('section', key='policies', tab='violations') }}"{% if active_tab == 'violations' %} aria-current="page"{% endif %}>Violations</a>
+</nav>
+
+{% if active_tab == 'violations' %}
+<div class="section-block">
+  <h2>Policy Violations</h2>
+  <p class="section-note">Policy evaluations and violations are shown for all completed scans currently cached in Scan Health.</p>
+  {% if violations %}
+    <table class="data-table">
+      <thead>
+        <tr><th>Scan</th><th>Project</th><th>Branch</th><th>Policy</th><th>Violation</th><th>Evaluation Summary</th><th>Evaluation Details</th></tr>
+      </thead>
+      <tbody>
+        {% for violation in violations %}
+        {% set violation_data = violation.raw %}
+        <tr>
+          <td>{{ violation.record.scan_id }}</td>
+          <td>{{ violation.record.project_name or violation.record.project_id }}</td>
+          <td>{{ violation.record.branch or "—" }}</td>
+          <td>{{ violation.record.policy_name or violation_data.policyName or "—" }}</td>
+          <td>{{ violation_data.violationName or violation_data.ruleName or violation_data.name or violation_data.message or "Policy violation" }}</td>
+          <td>{{ violation.summary }}</td>
+          <td>
+            <details>
+              <summary>View evaluation details</summary>
+              {% if violation.details %}
+                <dl class="policy-violation-details">
+                  {% for label, value in violation.details %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}
+                </dl>
+              {% else %}
+                <span class="section-note">No query/finding fields returned</span>
+              {% endif %}
+              <details>
+                <summary>Full details</summary>
+                <pre class="raw-json">{{ violation.record.raw_json }}</pre>
+              </details>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% elif evaluations %}
+    <p class="empty-state">No policy violations were returned for the latest completed project scans.</p>
+  {% else %}
+    <p class="empty-state">No violation data cached yet. Sync Policies after syncing Scan Health.</p>
+  {% endif %}
+</div>
+
+{% else %}
+<div class="section-block">
+  <h2>Policies</h2>
+  {% if policies %}
+    <table class="data-table">
+      <thead>
+        <tr><th>Policy Name</th><th>Rule Type</th><th>List of Rules</th><th>Exemptions</th><th>Break Build Enabled</th><th>Total Number of Projects Associated</th></tr>
+      </thead>
+      <tbody>
+        {% for policy in policies %}
+        <tr{{ flag('policy:' ~ policy.id) }}>
+          <td>{{ policy.name }}</td>
+          <td>{{ policy.rule_type }}</td>
+          <td>
+            {% if policy.rules %}
+              <span class="policy-rule-list">
+                {% for rule in policy.rules %}<span class="policy-rule-chip policy-rule-{{ rule.severity }}">{{ rule.label }}</span>{% endfor %}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{% if policy.exemptions %}{{ policy.exemptions|join(", ") }}{% else %}—{% endif %}</td>
+          <td>{% if policy.break_build is none %}Unknown{% else %}{{ policy.break_build | yesno }}{% endif %}</td>
+          <td>{{ policy.project_association }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty-state">No policies cached yet. Click "Sync Now" above to pull from the tenant.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

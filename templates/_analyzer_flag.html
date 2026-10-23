@@ -1,0 +1,9 @@
+{# Import "with context" so analyzer_highlights (set by the section route) is visible. #}
+{% macro flag(target) -%}
+{%- set h = analyzer_highlights.targets.get(target) if analyzer_highlights else none -%}
+{%- if h %} data-analyzer-level="{{ h.level|lower }}" title="{{ h.rules|join('\n') }}"{% endif -%}
+{%- endmacro %}
+
+{% macro is_flagged(target) -%}
+{{- 'yes' if analyzer_highlights and analyzer_highlights.targets.get(target) else '' -}}
+{%- endmacro %}

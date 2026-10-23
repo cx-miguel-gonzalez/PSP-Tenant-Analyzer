@@ -1,0 +1,21 @@
+<div class="sync-strip" data-section-key="{{ section_key }}">
+  <div class="sync-strip-info">
+    {% if sync_meta and sync_meta.last_synced_at %}
+      <span class="badge badge-{{ sync_meta.status }}">{{ sync_meta.status }}</span>
+      <span>{{ sync_meta.record_count }} record(s)</span>
+      <span class="sync-strip-timestamp">last synced {{ sync_meta.last_synced_at[:19].replace('T', ' ') }} UTC</span>
+      {% if sync_meta.message %}<span class="sync-strip-message">{{ sync_meta.message }}</span>{% endif %}
+    {% else %}
+      <span class="badge badge-idle">not yet synced</span>
+    {% endif %}
+  </div>
+  <div class="sync-strip-actions">
+    {% if sync_extra %}{{ sync_extra | safe }}{% endif %}
+    <button class="btn btn-accent section-sync-btn" type="button" data-section-key="{{ section_key }}">Sync Now</button>
+    {% if analyzable %}{% include "_analyze_button.html" %}{% endif %}
+  </div>
+</div>
+<div class="sync-progress-track" data-section-key="{{ section_key }}" role="progressbar" aria-label="Section sync progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+  <div class="sync-progress-bar" data-section-key="{{ section_key }}" style="width: 0%"></div>
+</div>
+<div class="sync-strip-progress" data-section-key="{{ section_key }}" role="status" aria-live="polite"></div>

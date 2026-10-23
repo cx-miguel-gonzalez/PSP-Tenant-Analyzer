@@ -1,0 +1,21 @@
+{# Expects `instances`: analyzer instance dicts (or plain strings from older reports). #}
+{% set first = instances[0] if instances else none %}
+{% set columns = (first.fields | list) if first is mapping and first.fields else ["Affected"] %}
+<div class="analyzer-instance-table-wrap">
+  <table class="data-table analyzer-instance-table">
+    <thead>
+      <tr>{% for column in columns %}<th>{{ column }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      {% for instance in instances %}
+      <tr>
+        {% if instance is mapping and instance.fields %}
+          {% for column in columns %}<td>{{ instance.fields.get(column, "") }}</td>{% endfor %}
+        {% else %}
+          <td colspan="{{ columns|length }}">{{ instance.label if instance is mapping else instance }}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

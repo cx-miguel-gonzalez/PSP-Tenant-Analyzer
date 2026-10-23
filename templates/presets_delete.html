@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Delete Presets - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Delete Presets</h1>
+</div>
+
+<div class="warning-banner">
+  <p><strong>Warning:</strong> deleting a preset removes it from your Checkmarx One tenant and cannot be
+  undone. Only Custom presets are listed here &mdash; Built-in presets cannot be deleted.</p>
+</div>
+
+{% if not presets %}
+  <div class="section-block"><p class="empty-state">No Custom presets cached yet. Sync from the Presets page first.</p></div>
+{% else %}
+<div class="toolbar-row">
+  <input type="search" id="preset-search" class="search-input" placeholder="Filter by name or description...">
+</div>
+
+<form method="post" action="{{ url_for('presets_delete_confirm') }}">
+  <div class="page-header">
+    <label class="checkbox-inline"><input type="checkbox" id="delete-select-all"><span>Select all</span></label>
+    <button type="submit" class="btn btn-danger" id="delete-selected-button" disabled>Delete selected (0)</button>
+  </div>
+
+  <div class="section-block section-block-flush">
+    <table class="data-table" id="presets-table">
+      <thead><tr><th></th><th data-sort-key="name" class="sortable">Name</th><th data-sort-key="description" class="sortable">Description</th></tr></thead>
+      <tbody>
+        {% for p in presets %}
+        <tr data-name="{{ p.name }}" data-description="{{ p.description or '' }}">
+          <td><input type="checkbox" class="delete-checkbox" name="selected_preset_ids" value="{{ p.id }}"></td>
+          <td>{{ p.name }}</td>
+          <td>{{ p.description or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

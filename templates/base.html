@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Checkmarx One Tenant Analyzer{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  {% if logged_in %}
+  <div class="app-shell">
+    <nav class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-mark"><img src="{{ url_for('static', filename='img/checkmarx-mark.png') }}" alt=""></span>
+        <div class="brand-text">
+          <strong>Tenant Analyzer</strong>
+          <span>{{ current_session.tenant if current_session }}</span>
+        </div>
+      </div>
+
+      <div class="sidebar-nav">
+        <a class="nav-item {% if request.path == url_for('dashboard') %}active{% endif %}" href="{{ url_for('dashboard') }}">
+          <span class="nav-icon">{{ dashboard_icon | safe }}</span>
+          <span class="nav-label">Overview</span>
+        </a>
+
+        <a class="nav-item {% if request.path == url_for('tenant_recommendations') %}active{% endif %}" href="{{ url_for('tenant_recommendations') }}">
+          <span class="nav-icon">{{ recommendations_icon | safe }}</span>
+          <span class="nav-label">Tenant Recommendations</span>
+        </a>
+
+        {% for s in sections %}
+        <a class="nav-item {% if section_key == s.key %}active{% endif %}" href="{{ url_for('section', key=s.key) }}">
+          <span class="nav-icon">{{ s.icon | safe }}</span>
+          <span class="nav-label">{{ s.label }}</span>
+        </a>
+        {% endfor %}
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="sync-all-btn" class="btn btn-accent btn-block" type="button">Sync All</button>
+        <div id="sync-all-status" class="sync-all-status"></div>
+        <a class="nav-item {% if request.path == url_for('analyzer_config') %}active{% endif %}" href="{{ url_for('analyzer_config') }}">
+          <span class="nav-icon">{{ analyzer_config_icon | safe }}</span>
+          <span class="nav-label">Analyzer Config</span>
+        </a>
+        <form action="{{ url_for('logout') }}" method="post">
+          <button class="btn btn-ghost btn-block" type="submit">Sign out</button>
+        </form>
+      </div>
+    </nav>
+
+    <div class="main">
+      <div class="flash-stack">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endwith %}
+      </div>
+      <div class="content">
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+    <div class="flash-stack standalone">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endwith %}
+    </div>
+    {% block bare_content %}{% endblock %}
+  {% endif %}
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

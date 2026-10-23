@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Analyzer Config - Tenant Analyzer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Analyzer Config</h1>
+</div>
+
+<p class="section-note">
+  Rules used by the tenant analyzer process to evaluate the data synced into this console.
+  Adjust a rule's warning level or disable it entirely -- disabled rules are skipped by the analyzer.
+</p>
+
+<nav class="section-tabs" aria-label="Analyzer config sections">
+  {% for rule_section in rule_sections %}
+  <a class="section-tab{{ ' active' if active_tab == rule_section.slug else '' }}" href="{{ url_for('analyzer_config', tab=rule_section.slug) }}"{% if active_tab == rule_section.slug %} aria-current="page"{% endif %}>{{ rule_section.label }}</a>
+  {% endfor %}
+</nav>
+
+{% for rule_section in rule_sections %}
+{% if active_tab == rule_section.slug %}
+<form method="post" action="{{ url_for('analyzer_config_save') }}">
+  <input type="hidden" name="active_tab" value="{{ rule_section.slug }}">
+  <div class="toolbar-row">
+    <button type="submit" class="btn btn-accent">Save Changes</button>
+  </div>
+
+  <div class="section-block">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Rule</th>
+          <th>Reasoning</th>
+          <th>Warning Level</th>
+          <th>Enabled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rule in rule_section.rules %}
+        <tr class="rule-row {{ '' if rule.enabled else 'rule-row-disabled' }}">
+          <td>{{ rule.rule_check }}</td>
+          <td class="section-note">{{ rule.reasoning }}</td>
+          <td>
+            <select name="warning_level__{{ rule.rule_key }}" class="select-input">
+              {% for level in ["High", "Medium", "Low"] %}
+              <option value="{{ level }}" {% if rule.warning_level == level %}selected{% endif %}>{{ level }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <input type="checkbox" class="rule-enabled-toggle" name="enabled__{{ rule.rule_key }}" aria-label="Enabled" {% if rule.enabled %}checked{% endif %}>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="toolbar-row">
+    <button type="submit" class="btn btn-accent">Save Changes</button>
+  </div>
+</form>
+{% endif %}
+{% endfor %}
+{% endblock %}

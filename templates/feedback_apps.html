@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Feedback Apps - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+<nav class="section-tabs" aria-label="Feedback apps and profiles views">
+  <a class="section-tab{{ ' active' if active_tab != 'profiles' else '' }}" href="{{ url_for('section', key='feedback_profiles', tab='apps') }}"{% if active_tab != 'profiles' %} aria-current="page"{% endif %}>Apps</a>
+  <a class="section-tab{{ ' active' if active_tab == 'profiles' else '' }}" href="{{ url_for('section', key='feedback_profiles', tab='profiles') }}"{% if active_tab == 'profiles' %} aria-current="page"{% endif %}>Profiles</a>
+</nav>
+
+{% macro value_chips(values, kind="") %}
+  {% if values is string %}{% set values = [values] %}{% endif %}
+  {% if values is sequence and values %}
+    <span class="feedback-chip-list">
+      {% for value in values %}
+        {% set label = value|string %}
+        {% set severity_class = "severity-" ~ label|lower if kind == "severity" and label|lower in ["critical", "high", "medium", "low", "info"] else ("severity-default" if kind == "severity" else "") %}
+        <span class="feedback-chip {{ severity_class }}">{{ label }}</span>
+      {% endfor %}
+    </span>
+  {% else %}
+    <span class="feedback-chip-list"><span class="feedback-chip feedback-chip-empty">—</span></span>
+  {% endif %}
+{% endmacro %}
+
+{% if active_tab == 'profiles' %}
+<div class="section-block">
+  <h2>Profiles</h2>
+  {% if profiles %}
+    <table class="data-table">
+      <thead>
+        <tr><th>Name</th><th>Type</th><th>Apps</th><th>Projects</th><th>Total Project Count</th></tr>
+      </thead>
+      <tbody>
+        {% for profile in profiles %}
+        {% set profile_data = profile.raw_json | from_json %}
+        {% set feedback_app_dtos = profile_data.feedbackAppDtos or [] %}
+        {% set project_ids = profile_data.projectsIds or profile_data.projectIds or [] %}
+        {% set app_names = namespace(values=[]) %}
+        {% for feedback_app in feedback_app_dtos %}
+          {% if feedback_app is mapping %}
+            {% set feedback_app_id = feedback_app.id or feedback_app.appId or feedback_app.app_id %}
+            {% set feedback_app_name = feedback_app.name or feedback_app.appName or feedback_app.displayName or feedback_apps_by_id.get(feedback_app_id|string) or feedback_app_id %}
+          {% else %}
+            {% set feedback_app_name = feedback_apps_by_id.get(feedback_app|string, feedback_app) %}
+          {% endif %}
+          {% if feedback_app_name %}{% set app_names.values = app_names.values + [feedback_app_name|string] %}{% endif %}
+        {% endfor %}
+        {% set project_names = namespace(values=[]) %}
+        {% for project_id in project_ids %}
+          {% set normalized_project_id = (project_id.id or project_id.projectId or project_id.project_id) if project_id is mapping else project_id %}
+          {% set project_name = projects_by_id.get(normalized_project_id|string, normalized_project_id) %}
+          {% if project_name %}{% set project_names.values = project_names.values + [project_name|string] %}{% endif %}
+        {% endfor %}
+        <tr{{ flag('feedback_profile:' ~ profile.id) }}>
+          <td>{{ profile.name or "—" }}</td>
+          <td>{{ profile.profile_type or "—" }}</td>
+          <td>{{ value_chips(app_names.values) }}</td>
+          <td title="{{ project_names.values|join(', ') }}">
+            {% set visible_project_names = project_names.values[:10] %}
+            {{ value_chips(visible_project_names) }}{% if project_names.values|length > 10 %}<span class="feedback-chip feedback-chip-more" title="{{ project_names.values|length - 10 }} more projects">...</span>{% endif %}
+          </td>
+          <td>{{ project_ids|length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty-state">No feedback profiles cached. Click "Sync Now" above to pull from the tenant.</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="section-block">
+  <h2>Apps</h2>
+  {% if apps %}
+    <table class="data-table" id="feedback-apps-table">
+      <thead>
+        <tr>
+          <th data-sort-key="0" class="sortable">Name</th>
+          <th data-sort-key="1" class="sortable">Type</th>
+          <th data-sort-key="2" class="sortable">State</th>
+          <th data-sort-key="3" class="sortable">Engines</th>
+          <th data-sort-key="4" class="sortable">Severity</th>
+        </tr>
+        <tr class="table-filter-row">
+          <th><input type="search" class="feedback-apps-filter" data-filter-column="0" aria-label="Filter apps by name" placeholder="Filter name"></th>
+          <th><input type="search" class="feedback-apps-filter" data-filter-column="1" aria-label="Filter apps by type" placeholder="Filter type"></th>
+          <th><input type="search" class="feedback-apps-filter" data-filter-column="2" aria-label="Filter apps by state" placeholder="Filter state"></th>
+          <th><input type="search" class="feedback-apps-filter" data-filter-column="3" aria-label="Filter apps by engines" placeholder="Filter engines"></th>
+          <th><input type="search" class="feedback-apps-filter" data-filter-column="4" aria-label="Filter apps by severity" placeholder="Filter severity"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for app in apps %}
+        {% set app_data = app.raw_json | from_json %}
+        {% set filter_data = app_data.filters or app_data.filter or {} %}
+        {% set state = filter_data.state or filter_data.states or app_data.state or app_data.states or [] %}
+        {% set engines = filter_data.engines or filter_data.engine or filter_data.scanners or app_data.engines or app_data.scanners or [] %}
+        {% set severity = filter_data.severity or filter_data.severities or app_data.severity or app_data.severities or [] %}
+        <tr{{ flag('feedback_app:' ~ app.id) }}>
+          <td>{{ app.name or "—" }}</td>
+          <td>{{ app.app_type or "—" }}</td>
+          <td>{{ value_chips(state) }}</td>
+          <td>{{ value_chips(engines) }}</td>
+          <td>{{ value_chips(severity, "severity") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty-state">No feedback apps cached. Click "Sync Now" above to pull from the tenant.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

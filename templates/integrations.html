@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Integrations - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag, is_flagged with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <h3>Integration Breakdown <span class="section-note">(scans by type)</span></h3>
+    {% if integration_totals %}
+    <div class="bar-chart">
+      {% for row in integration_totals %}
+      <a class="bar-column" href="{{ url_for('section', key='scan_health') }}?origin={{ row.label | urlencode }}">
+        <span class="bar-value">{{ row.count }}</span>
+        <div class="bar" style="height: {{ (row.count / max_integration_count * 100) | round(1) }}%;"></div>
+        <span class="bar-label" title="{{ row.label }}">{{ row.label }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <p class="section-note">Click a bar to see those scans in Scan Health.</p>
+    {% else %}
+      <p class="empty-state">No classified integration scans cached yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="kpi-card">
+    <h3>Integration Scan Mix <span class="section-note">(share of integration scans)</span></h3>
+    {% if integration_pie_total %}
+    <div class="pie-chart-row">
+      <div class="pie-chart" style="background: conic-gradient({% for s in integration_pie_slices %}{{ s.color }} {{ s.start }}% {{ s.end }}%{% if not loop.last %}, {% endif %}{% endfor %});">
+        <div class="pie-chart-hole">
+          <span class="pie-chart-total">{{ integration_pie_total }}</span>
+          <span class="pie-chart-total-label">scans</span>
+        </div>
+      </div>
+      <ul class="pie-legend">
+        {% for s in integration_pie_slices %}
+        <li><span class="legend-swatch" style="background: {{ s.color }};"></span>{{ s.label }} &mdash; {{ s.count }} ({{ "%.0f"|format(s.pct) }}%)</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+      <p class="empty-state">No integration scans cached yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section-block">
+  <h2>Source control connections</h2>
+  {% if scm_connections %}
+    {% for scm in scm_connections %}
+    <div class="scm-group">
+      <h3>
+        {{ scm.instance_name or scm.display_name }}
+        <span class="badge badge-idle">{{ scm.scm_type }}</span>
+        {% if scm.on_prem %}<span class="badge badge-warning">on-prem</span>{% endif %}
+      </h3>
+      {% set scm_orgs = orgs_by_scm.get(scm.id, []) %}
+      {% if scm_orgs %}
+        <div class="scm-org-grid">
+          {% for org in scm_orgs %}
+          <button type="button" class="scm-org-box" data-org-id="{{ org.org_id }}"{{ flag('org:' ~ org.org_id) }}>
+            {{ org.org_identity }}
+            {% if org.is_user_org %}<span class="scm-org-badge">personal</span>{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty-state">No organizations connected for this SCM.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty-state">No SCM connections cached yet. Click "Sync Now" above to sync.</p>
+  {% endif %}
+</div>
+
+{% macro usage_box(row) %}
+  <a class="usage-box{{ ' usage-box-zero' if row.count == 0 else '' }}" href="{{ url_for('section', key='scan_health') }}?origin={{ row.label | urlencode }}"{% if is_flagged('origin:' ~ row.label) %}{{ flag('origin:' ~ row.label) }}{% else %} title="{{ row.label }}"{% endif %}>
+    {{ row.label[:20] }}{% if row.label|length > 20 %}...{% endif %}
+    <span class="usage-box-count">{{ row.count }}</span>
+  </a>
+{% endmacro %}
+
+<div class="section-block">
+  <h2>CI/CD &amp; IDE plugin usage</h2>
+  <p class="section-note">
+    Derived from the scan origin/user-agent field on synced scans -- not a separate sync. Click a box to jump to those scans in Scan Health.
+    {% if scan_health_meta and scan_health_meta.last_synced_at %}
+      Based on Scan Health data synced {{ scan_health_meta.last_synced_at[:19].replace('T', ' ') }} UTC.
+    {% else %}
+      Scan Health has not been synced yet -- sync it to populate this breakdown.
+    {% endif %}
+  </p>
+
+  <div class="scm-group">
+    <h3>CI/CD</h3>
+    <div class="usage-box-grid">
+      {% for row in cicd_usage %}{{ usage_box(row) }}{% endfor %}
+    </div>
+  </div>
+
+  <div class="scm-group">
+    <h3>IDE Plugin Usage</h3>
+    <div class="usage-box-grid">
+      {% for row in ide_usage %}{{ usage_box(row) }}{% endfor %}
+    </div>
+  </div>
+
+  <div class="scm-group">
+    <h3>Platform Scans <span class="section-note">(CxOne's own project and scheduled scans)</span></h3>
+    <div class="usage-box-grid">
+      {% for row in platform_usage %}{{ usage_box(row) }}{% endfor %}
+    </div>
+  </div>
+
+  <div class="scm-group">
+    <h3>Custom</h3>
+    {% if custom_usage %}
+      <div class="usage-box-grid">
+        {% for row in custom_usage %}{{ usage_box(row) }}{% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">No scans from an unrecognized tool or agent -- everything synced so far is either a webapp/plain scan, or already covered by CI/CD, IDE Plugin Usage, or Platform Scans above.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div id="scm-org-panel-backdrop" class="panel-backdrop" hidden></div>
+<aside id="scm-org-panel" class="detail-panel" aria-hidden="true">
+  <div class="detail-panel-header">
+    <div>
+      <h2 id="scm-org-panel-title">Org Settings</h2>
+      <p id="scm-org-panel-meta" class="section-note"></p>
+    </div>
+    <button id="scm-org-panel-close" class="btn btn-outline btn-small" type="button">Close</button>
+  </div>
+  <div id="scm-org-panel-body" class="detail-panel-body"></div>
+</aside>
+{% endblock %}

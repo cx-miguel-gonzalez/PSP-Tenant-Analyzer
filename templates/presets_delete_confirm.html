@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Confirm Delete - Tenant Analyzer{% endblock %}
+{% block content %}
+<a class="btn btn-outline" href="{{ url_for('presets_delete') }}">&larr; Back</a>
+
+<div class="page-header">
+  <h1>Confirm Delete</h1>
+</div>
+
+<div class="warning-banner">
+  <p><strong>This cannot be undone.</strong> The following {{ presets|length }} preset(s) will be
+  permanently deleted from your Checkmarx One tenant:</p>
+</div>
+
+<div class="section-block">
+  <ul class="plain-list">
+    {% for p in presets %}<li>{{ p.name }} <span class="section-note">(id {{ p.id }})</span></li>{% endfor %}
+  </ul>
+
+  <form method="post" action="{{ url_for('presets_delete_apply') }}">
+    {% for p in presets %}<input type="hidden" name="preset_ids" value="{{ p.id }}">{% endfor %}
+    <div class="button-row">
+      <button type="submit" class="btn btn-danger">Delete Presets</button>
+      <a class="btn btn-outline" href="{{ url_for('presets_delete') }}">Back</a>
+      <a class="btn btn-outline" href="{{ url_for('section', key='preset_management') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

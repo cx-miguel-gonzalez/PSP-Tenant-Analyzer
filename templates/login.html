@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Sign in - Tenant Analyzer{% endblock %}
+{% block bare_content %}
+<div class="login-shell">
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="brand-mark"><img src="{{ url_for('static', filename='img/checkmarx-mark.png') }}" alt=""></span>
+      <h1>Tenant Analyzer</h1>
+    </div>
+    <p class="login-subtitle">Sign in to your Checkmarx One tenant to sync and review its health.</p>
+
+    {% if env_config %}
+    <form action="{{ url_for('login_env') }}" method="post" class="login-env-form">
+      <button class="btn btn-accent btn-block" type="submit">Sign in using .env credentials ({{ env_config.tenant }})</button>
+    </form>
+    <div class="login-divider"><span>or enter credentials manually</span></div>
+    {% endif %}
+
+    <form action="{{ url_for('login') }}" method="post" class="login-form">
+      <label>Tenant name
+        <input type="text" name="tenant" required placeholder="my-tenant">
+      </label>
+      <label>Base URL
+        <input type="text" name="base_url" value="{{ default_base_url }}">
+      </label>
+      <label>IAM URL
+        <input type="text" name="iam_url" value="{{ default_iam_url }}">
+      </label>
+
+      <fieldset class="auth-method">
+        <legend>Authentication method</legend>
+        <label class="radio-label"><input type="radio" name="auth_method" value="api_key" checked> API Key</label>
+        <label class="radio-label"><input type="radio" name="auth_method" value="client_credentials"> Client ID / Secret</label>
+      </fieldset>
+
+      <label>API Key
+        <input type="password" name="api_key" placeholder="Refresh token / API key">
+      </label>
+      <label>Client ID
+        <input type="text" name="client_id">
+      </label>
+      <label>Client Secret
+        <input type="password" name="client_secret">
+      </label>
+
+      <button class="btn btn-accent btn-block" type="submit">Sign in</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
