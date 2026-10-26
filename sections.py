@@ -129,7 +129,7 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
         try:
             db.save_scan_workflow(scan_id, cx_client.get_scan_workflow(sess["base_url"], sess["token"], scan_id))
         except cx_client.CxApiError:
-            logger.exception("Failed to fetch workflow for scan %s", scan_id)
+            logger.exception("Failed to fetch workflow for scan %s", cx_client.log_safe(scan_id))
             unavailable += 1
     message = f"Synced {count} scan(s) ({window_note})."
     if to_fetch:

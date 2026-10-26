@@ -96,6 +96,26 @@ def safe_tenant(tenant: str) -> str:
     return quote(tenant, safe="")
 
 
+_CREDENTIAL_RE = re.compile(r"[\x21-\x7e]{1,8192}")  # printable ASCII, no whitespace/control chars
+
+
+def safe_credentials(method: str, client_id=None, client_secret=None, api_key=None):
+    """(method, client_id, client_secret, api_key) keeping only the credentials
+    the chosen auth method uses, each checked to be a plausible token string.
+    The values are never echoed back in the error."""
+    def check(value, label):
+        value = (value or "").strip()
+        if not _CREDENTIAL_RE.fullmatch(value):
+            raise CxApiError(f"{label} is required and may only contain printable characters without spaces.")
+        return value
+
+    if method == "api_key":
+        return method, None, None, check(api_key, "API key")
+    if method == "client_credentials":
+        return method, check(client_id, "Client ID"), check(client_secret, "Client Secret"), None
+    raise CxApiError("Unknown auth method.")
+
+
 def _api_key_exchange_audience() -> str:
     """Public (non-secret) audience name Checkmarx One's IAM uses for the
     refresh-token grant that exchanges a tenant API key for an access token.
@@ -160,6 +180,13 @@ def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
 
+def log_safe(value) -> str:
+    """`value` as a single log line: CR/LF and other non-printable characters
+    (e.g. a %0A smuggled into a route parameter that ends up in a request
+    path) are written as escapes like \\n, so they can't fake extra log lines."""
+    return "".join(c if c.isprintable() else repr(c)[1:-1] for c in str(value))
+
+
 def _request(
     method: str, base_url: str, token: str, path: str, best_effort: bool = False, **kwargs
 ) -> requests.Response:
@@ -182,7 +209,9 @@ def _request(
         # the response body (often the actual validation reason, e.g. a bad
         # query param) goes to the server log instead, so a failure is
         # diagnosable from /tmp without having to guess at the cause again.
-        logger.warning("%s %s failed (%s): %s", method, path, resp.status_code, resp.text[:2000])
+        logger.warning(
+            "%s %s failed (%s): %s", method, log_safe(path), resp.status_code, log_safe(resp.text[:2000])
+        )
         raise CxApiError(
             f"{method} {path} failed ({resp.status_code}).",
             status_code=resp.status_code,

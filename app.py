@@ -221,7 +221,14 @@ def _env_config() -> dict | None:
 
 def _establish_session(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key):
     try:
+        # Every login field is validated/normalized here, before it's used for
+        # a request or kept in the server-side session (_SESSIONS).
         base_url = cx_client.safe_endpoint(base_url)  # reject non-Checkmarx hosts before any request
+        iam_url = cx_client.safe_endpoint(iam_url)
+        tenant = cx_client.safe_tenant(tenant)
+        auth_method, client_id, client_secret, api_key = cx_client.safe_credentials(
+            auth_method, client_id, client_secret, api_key
+        )
         token, expires_in = cx_client.get_access_token(
             iam_url, tenant, auth_method,
             client_id=client_id, client_secret=client_secret, api_key=api_key,
