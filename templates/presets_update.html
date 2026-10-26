@@ -17,6 +17,7 @@
 {% endif %}
 
 <form method="post" id="update-preset-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="section-block section-block-narrow">
     {% if not meta.is_custom %}
     <label class="field-label">New Preset Name

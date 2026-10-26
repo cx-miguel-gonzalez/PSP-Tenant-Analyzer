@@ -36,6 +36,7 @@
   <pre class="raw-json code-block">{{ payload_json }}</pre>
 
   <form method="post" action="{{ url_for('preset_update_confirm', preset_id=meta.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="final_by_family_json" value='{{ final_by_family_json }}'>
     <input type="hidden" name="description" value="{{ target_description }}">
     {% if is_builtin %}<input type="hidden" name="new_preset_name" value="{{ new_preset_name }}">{% endif %}

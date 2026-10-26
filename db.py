@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS scans (
     created_at TEXT,
     updated_at TEXT,
     raw_json TEXT NOT NULL,
-    loc INTEGER
+    loc INTEGER,
+    duration_minutes REAL
 );
 
 CREATE TABLE IF NOT EXISTS scm_connections (
@@ -335,6 +336,12 @@ def _init_tenant_schema(conn: sqlite3.Connection) -> None:
         existing_scan_columns = {row["name"] for row in conn.execute("PRAGMA table_info(scans)")}
         if "loc" not in existing_scan_columns:
             conn.execute("ALTER TABLE scans ADD COLUMN loc INTEGER")
+        if "duration_minutes" not in existing_scan_columns:
+            conn.execute("ALTER TABLE scans ADD COLUMN duration_minutes REAL")
+            conn.executemany(  # backfill already-cached scans from their stored API records
+                "UPDATE scans SET duration_minutes = ? WHERE id = ?",
+                [(scan_duration_minutes(json.loads(raw)), sid) for sid, raw in conn.execute("SELECT id, raw_json FROM scans").fetchall()],
+            )
         existing_violation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(policy_violations)")}
         if "branch" not in existing_violation_columns:
             conn.execute("ALTER TABLE policy_violations ADD COLUMN branch TEXT")
@@ -430,7 +437,7 @@ def all_sync_meta() -> dict[str, sqlite3.Row]:
 _REPLACEABLE_TABLES = {
     "tenant_config": 5,
     "presets": 7,
-    "scans": 12,
+    "scans": 13,
     "scm_connections": 6,
     "scm_orgs": 6,
     "feedback_apps": 4,
@@ -615,6 +622,20 @@ def get_query_metadata(query_id) -> dict | None:
     }
 
 
+def query_catalog_by_id() -> dict[str, dict]:
+    """The whole synced query catalog keyed by queryId, each entry shaped like
+    get_query_metadata's result."""
+    with get_connection() as conn:
+        rows = conn.execute("SELECT query_id, family, name, group_name, severity FROM query_catalog").fetchall()
+    return {
+        row["query_id"]: {
+            "queryId": row["query_id"], "language": row["family"], "group": row["group_name"],
+            "name": row["name"], "severity": row["severity"],
+        }
+        for row in rows
+    }
+
+
 def normalize_preset_queries(preset: dict) -> list[dict]:
     """Returns a flat list of query dicts (queryId, language, group, name,
     severity), resolving a preset's grouped-by-family bare queryIds against
@@ -760,11 +781,49 @@ def replace_scans(scans: list[dict], loc_by_id: dict | None = None) -> int:
             (
                 scan_id, project_id, project_name, status, branch, engines,
                 origin, initiator, created_at, updated_at, json.dumps(scan), loc,
+                scan_duration_minutes(scan),
             )
         )
     with get_connection() as conn:
         _replace_all(conn, "scans", rows)
     return len(rows)
+
+
+def _parse_timestamp(value) -> datetime | None:
+    """CxOne timestamps carry 1-9 fractional-second digits (e.g. ".45045"),
+    which Python 3.9's fromisoformat rejects -- normalize to microseconds.
+    Engines with no recorded time report Go's zero time "0001-01-01T00:00:00Z";
+    that's treated as missing, not as a real date."""
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    text = re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], text, count=1)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.year >= 2000 else None
+
+
+def scan_duration_minutes(scan: dict) -> float | None:
+    """How long the scan ran: earliest engine start to latest engine end in
+    statusDetails, which matches the duration CxOne shows. Falls back to the
+    "general" entry's own start/end when no engine ran (e.g. the source
+    fetch failed). Deliberately NOT updatedAt - createdAt: updatedAt moves
+    whenever the scan is modified later, inflating finished scans by days."""
+    details = [d for d in scan.get("statusDetails") or [] if isinstance(d, dict)]
+
+    def timed(entries):
+        # Only entries with both a real start and a real end.
+        pairs = [(_parse_timestamp(d.get("startDate")), _parse_timestamp(d.get("endDate"))) for d in entries]
+        return [(start, end) for start, end in pairs if start and end and end >= start]
+
+    engines = timed(d for d in details if d.get("name") != "general")
+    pairs = engines or timed(d for d in details if d.get("name") == "general")
+    if not pairs:
+        return None
+    duration = (max(end for _, end in pairs) - min(start for start, _ in pairs)).total_seconds() / 60
+    return round(duration, 4)
 
 
 def list_scans(limit: int | None = None) -> list[sqlite3.Row]:
@@ -776,23 +835,11 @@ def list_scans(limit: int | None = None) -> list[sqlite3.Row]:
 
 
 def list_scans_with_duration() -> list[sqlite3.Row]:
-    """Same as list_scans() but with a computed duration_minutes column, for
-    the Scans explorer table -- lets the UI show/sort/highlight by duration
-    without every caller re-deriving it."""
+    """Same as list_scans(); duration_minutes is stored per scan at sync time
+    (see scan_duration_minutes), so the Scans explorer and the duration
+    KPIs all share one definition."""
     with get_connection() as conn:
-        return conn.execute(
-            """
-            SELECT *,
-                   CASE
-                       WHEN created_at IS NOT NULL AND updated_at IS NOT NULL
-                            AND julianday(updated_at) >= julianday(created_at)
-                       THEN (julianday(updated_at) - julianday(created_at)) * 24 * 60
-                       ELSE NULL
-                   END AS duration_minutes
-            FROM scans
-            ORDER BY created_at DESC
-            """
-        ).fetchall()
+        return conn.execute("SELECT * FROM scans ORDER BY created_at DESC").fetchall()
 
 
 def scan_status_breakdown() -> list[sqlite3.Row]:
@@ -888,9 +935,8 @@ def integration_type_totals() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Scan Health KPIs -- duration is derived from created_at/updated_at (no
-# separate duration field from the API). SQLite's julianday() accepts the
-# ISO8601 "T"-separated timestamps the API returns directly.
+# Scan Health KPIs -- all durations come from the stored duration_minutes
+# (engine start/end from statusDetails; see scan_duration_minutes).
 # ---------------------------------------------------------------------------
 def long_running_scans_by_project(min_minutes: int = 30) -> list[sqlite3.Row]:
     """Every project with at least one scan running longer than min_minutes,
@@ -900,12 +946,10 @@ def long_running_scans_by_project(min_minutes: int = 30) -> list[sqlite3.Row]:
             """
             SELECT project_id, project_name,
                    COUNT(*) AS long_scan_count,
-                   MAX((julianday(updated_at) - julianday(created_at)) * 24 * 60) AS max_minutes,
-                   AVG((julianday(updated_at) - julianday(created_at)) * 24 * 60) AS avg_minutes
+                   MAX(duration_minutes) AS max_minutes,
+                   AVG(duration_minutes) AS avg_minutes
             FROM scans
-            WHERE created_at IS NOT NULL AND updated_at IS NOT NULL
-              AND julianday(updated_at) >= julianday(created_at)
-              AND (julianday(updated_at) - julianday(created_at)) * 24 * 60 >= ?
+            WHERE duration_minutes IS NOT NULL AND duration_minutes >= ?
             GROUP BY project_id, project_name
             ORDER BY long_scan_count DESC, max_minutes DESC
             """,
@@ -971,11 +1015,9 @@ def inconsistent_scan_projects(min_scans: int = 3, limit: int = 10) -> list[dict
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT project_id, project_name,
-                   (julianday(updated_at) - julianday(created_at)) * 24 * 60 AS minutes
+            SELECT project_id, project_name, duration_minutes AS minutes
             FROM scans
-            WHERE created_at IS NOT NULL AND updated_at IS NOT NULL
-              AND julianday(updated_at) >= julianday(created_at)
+            WHERE duration_minutes IS NOT NULL
             """
         ).fetchall()
 

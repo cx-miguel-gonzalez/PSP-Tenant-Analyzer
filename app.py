@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, Response, flash, g, redirect, render_template, request, session, url_for
+from flask_wtf.csrf import CSRFError, CSRFProtect
 
 import analyzer
 import cx_client
@@ -37,6 +38,45 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config["WTF_CSRF_TIME_LIMIT"] = None  # token lives as long as the session, so a page left open still submits
+
+# Every POST (forms and app.js fetches) must carry this session's CSRF token,
+# so another site can't submit forms here -- e.g. post to /login to sign the
+# browser into a different tenant or point the app at other hosts.
+csrf = CSRFProtect(app)
+
+# Tenant data cached from the API reaches pages only through Jinja
+# autoescaping or JSON read by app.js via textContent. This policy is the
+# backstop if that ever slips: only same-origin scripts may run (no inline
+# or injected <script>, no event-handler attributes), and responses can't be
+# MIME-sniffed into HTML. Inline styles stay allowed for the computed chart
+# widths/colors in the templates.
+_CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+
+@app.after_request
+def _set_security_headers(response):
+    response.headers.setdefault("Content-Security-Policy", _CONTENT_SECURITY_POLICY)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    if request.is_secure:  # only meaningful over https; never sent on the local http server
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
+
+@app.errorhandler(CSRFError)
+def _csrf_failed(error):
+    flash("That form expired or didn't come from this app. Please try again.", "error")
+    return redirect(url_for("dashboard"))
 
 
 @app.template_filter("from_json")
@@ -181,6 +221,7 @@ def _env_config() -> dict | None:
 
 def _establish_session(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key):
     try:
+        base_url = cx_client.safe_endpoint(base_url)  # reject non-Checkmarx hosts before any request
         token, expires_in = cx_client.get_access_token(
             iam_url, tenant, auth_method,
             client_id=client_id, client_secret=client_secret, api_key=api_key,
@@ -1425,6 +1466,44 @@ def presets_compare_export_csv():
     )
 
 
+# The combine/update flows carry the chosen queries between steps in hidden
+# form fields, so what comes back is only a request: every id is resolved
+# against what the tenant actually has (the synced catalog plus the presets
+# involved), unknown ids are dropped, and the names/families shown or sent to
+# Checkmarx come from that lookup, never from the form. A submission naming
+# more ids than exist isn't a real form and is rejected outright.
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # well above any real preset form
+
+
+def _query_lookup(*presets) -> dict[str, dict]:
+    lookup = db.query_catalog_by_id()
+    for preset in presets:
+        for query in db.normalize_preset_queries(preset) if preset else []:
+            if query.get("queryId") is not None:
+                lookup.setdefault(str(query["queryId"]), {**query, "queryId": str(query["queryId"])})
+    return lookup
+
+
+def _known_queries(query_ids, lookup: dict[str, dict]) -> list[dict]:
+    query_ids = [str(query_id) for query_id in query_ids]
+    if len(query_ids) > len(lookup):
+        raise ValueError("more queries submitted than the tenant has")
+    return [lookup[query_id] for query_id in dict.fromkeys(query_ids) if query_id in lookup]
+
+
+def _submitted_query_list(queries_json: str, *presets) -> list[dict]:
+    """A combine flow's hidden queries_json, reduced to the tenant's real queries."""
+    entries = json.loads(queries_json)
+    if not isinstance(entries, list):
+        raise ValueError("expected a list of queries")
+    ids = [entry.get("queryId") for entry in entries if isinstance(entry, dict) and entry.get("queryId") is not None]
+    return _known_queries(ids, _query_lookup(*presets))
+
+
+def _combine_presets_from_form():
+    return db.get_cached_preset(request.form.get("a_id")), db.get_cached_preset(request.form.get("b_id"))
+
+
 @app.route("/presets/compare/combine", methods=["POST"])
 def presets_compare_combine():
     a_id = request.form.get("a_id")
@@ -1467,8 +1546,8 @@ def presets_compare_combine_export_csv():
     preset_name = request.form.get("preset_name", "").strip() or "Combined Preset"
     queries_json = request.form.get("queries_json", "[]")
     try:
-        final_list = json.loads(queries_json)
-    except json.JSONDecodeError:
+        final_list = _submitted_query_list(queries_json, *_combine_presets_from_form())
+    except ValueError:
         flash("Could not read the combined query list; please try again.", "error")
         return redirect(url_for("section", key="preset_management"))
 
@@ -1488,8 +1567,8 @@ def presets_compare_combine_confirm():
     a_id = request.form.get("a_id")
     b_id = request.form.get("b_id")
     try:
-        final_list = json.loads(queries_json)
-    except json.JSONDecodeError:
+        final_list = _submitted_query_list(queries_json, *_combine_presets_from_form())
+    except ValueError:
         flash("Could not read the combined query list; please try again.", "error")
         return redirect(url_for("section", key="preset_management"))
 
@@ -1516,7 +1595,7 @@ def presets_compare_combine_confirm():
         existing_is_builtin=existing_is_builtin,
         a_id=a_id, b_id=b_id,
         total_queries=len(final_list), payload_json=json.dumps(payload, indent=2),
-        queries_json=queries_json,
+        queries_json=json.dumps(final_list),
     )
 
 
@@ -1529,8 +1608,8 @@ def presets_compare_combine_apply():
     target_preset_id = request.form.get("target_preset_id") or None
 
     try:
-        final_list = json.loads(queries_json)
-    except json.JSONDecodeError:
+        final_list = _submitted_query_list(queries_json, *_combine_presets_from_form())
+    except ValueError:
         flash("Could not read the combined query list; please try again.", "error")
         return redirect(url_for("section", key="preset_management"))
 
@@ -1633,19 +1712,21 @@ def preset_update(preset_id):
         flash("Built-in presets cannot be modified directly -- enter a New Preset Name.", "error")
         return redirect(url_for("preset_update", preset_id=preset_id))
 
-    selected_ids = set(request.form.getlist("selected_query_ids"))
+    lookup = _query_lookup(preset)
+    try:
+        selected = _known_queries(request.form.getlist("selected_query_ids"), lookup)
+    except ValueError:
+        flash("Could not read the selected queries; please try again.", "error")
+        return redirect(url_for("preset_update", preset_id=preset_id))
+    current_ids = {str(query_id) for query_id in current_ids}
+    selected_ids = {query["queryId"] for query in selected}
     added_ids = selected_ids - current_ids
     removed_ids = current_ids - selected_ids
 
-    def _resolve(query_id):
-        return db.get_query_metadata(query_id) or {
-            "queryId": query_id, "language": "Unknown", "group": "Uncategorized", "name": query_id,
-        }
-
     def _sorted_resolved(ids):
-        return sorted((_resolve(q) for q in ids), key=lambda q: (q["language"], q["group"], q["name"]))
+        return sorted((lookup[q] for q in ids), key=lambda q: (q["language"], q["group"], q["name"]))
 
-    final_by_family = db.group_queries_by_family(_resolve(q) for q in selected_ids)
+    final_by_family = db.group_queries_by_family(selected)
     target_name = new_preset_name if is_builtin else meta["name"]
     target_description = request.form.get("description", "").strip()
 
@@ -1675,8 +1756,13 @@ def preset_update_confirm(preset_id):
 
     final_by_family_json = request.form.get("final_by_family_json", "{}")
     try:
-        final_by_family = json.loads(final_by_family_json)
-    except json.JSONDecodeError:
+        submitted = json.loads(final_by_family_json)
+        if not isinstance(submitted, dict) or not all(isinstance(ids, list) for ids in submitted.values()):
+            raise ValueError("expected {family: [queryId, ...]}")
+        # Families are re-derived from the lookup, not taken from the form.
+        selected = _known_queries([qid for ids in submitted.values() for qid in ids], _query_lookup(db.get_cached_preset(preset_id)))
+        final_by_family = db.group_queries_by_family(selected)
+    except ValueError:
         flash("Could not read the confirmed query list; please try again.", "error")
         return redirect(url_for("preset_update", preset_id=preset_id))
 
@@ -1854,4 +1940,6 @@ def inject_globals():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8888, threaded=True)
+    # Debug mode (Werkzeug's interactive debugger + reloader) is opt-in via
+    # FLASK_DEBUG=1 in .env, which Flask reads on startup; off by default.
+    app.run(host="127.0.0.1", port=8888, threaded=True)

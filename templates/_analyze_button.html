@@ -1,4 +1,5 @@
 <form method="post" action="{{ url_for('analyze_section', key=section_key) }}" class="analyze-section-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {% if request.args.get('tab') %}<input type="hidden" name="tab" value="{{ request.args.get('tab') }}">{% endif %}
   <button class="btn btn-outline" type="submit" title="Re-run the Analyzer Config rules for this section only">Analyze</button>
 </form>
