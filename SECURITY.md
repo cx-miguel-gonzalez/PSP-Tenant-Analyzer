@@ -2,9 +2,11 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately through GitHub: open this
-repository's **Security** tab and choose **Report a vulnerability**. Do not
-open a public issue for a suspected vulnerability.
+Please report security issues privately through GitHub's private
+vulnerability reporting:
+<https://github.com/cx-miguel-gonzalez/PSP-Tenant-Analyzer/security/advisories/new>
+(or open this repository's **Security** tab and choose **Report a
+vulnerability**). Do not open a public issue for a suspected vulnerability.
 
 Include what you found, the steps to reproduce it, and the commit you tested.
 You can expect an acknowledgement within five business days.
