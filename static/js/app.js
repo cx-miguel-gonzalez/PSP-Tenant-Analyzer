@@ -1,3 +1,10 @@
+// POSTs from fetch() carry the session's CSRF token (rendered into base.html)
+// in the header Flask-WTF checks, the same way forms send it as a field.
+function postWithCsrf(url) {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return fetch(url, { method: "POST", headers: { "X-CSRFToken": meta ? meta.content : "" } });
+}
+
 function csvEscape(value) {
   const str = String(value ?? "");
   return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
@@ -64,7 +71,7 @@ function wireSectionSync() {
       const query = params.toString();
       const startUrl = `/sync/${key}/start${query ? `?${query}` : ""}`;
 
-      fetch(startUrl, { method: "POST" }).then(() => {
+      postWithCsrf(startUrl).then(() => {
         pollStatus(
           `/sync/${key}/status`,
           (data) => {
@@ -114,7 +121,7 @@ function wireSyncAll() {
   btn.addEventListener("click", () => {
     btn.disabled = true;
     btn.textContent = "Syncing All...";
-    fetch("/sync/all/start", { method: "POST" }).then(() => {
+    postWithCsrf("/sync/all/start").then(() => {
       pollStatus(
         "/sync/all/status",
         (data) => {

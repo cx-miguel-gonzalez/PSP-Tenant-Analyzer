@@ -18,6 +18,7 @@
 </div>
 
 <form method="post" action="{{ url_for('presets_delete_confirm') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="page-header">
     <label class="checkbox-inline"><input type="checkbox" id="delete-select-all"><span>Select all</span></label>
     <button type="submit" class="btn btn-danger" id="delete-selected-button" disabled>Delete selected (0)</button>

@@ -15,6 +15,7 @@
 
 <div class="section-block section-block-narrow">
   <form method="post" action="{{ url_for('presets_compare_combine_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label class="field-label">Preset name
       <input type="text" name="preset_name" value="{{ preset_name }}" required>
     </label>
@@ -54,9 +55,12 @@
   <pre class="raw-json code-block">{{ payload_json }}</pre>
 
   <form method="post" action="{{ url_for('presets_compare_combine_apply') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="preset_name" value="{{ preset_name }}">
     <input type="hidden" name="description" value="{{ description }}">
     <input type="hidden" name="queries_json" value='{{ queries_json }}'>
+    <input type="hidden" name="a_id" value="{{ a_id }}">
+    <input type="hidden" name="b_id" value="{{ b_id }}">
     {% if existing %}<input type="hidden" name="target_preset_id" value="{{ existing.id }}">{% endif %}
     <div class="button-row">
       <button type="submit" class="btn btn-accent">Push Changes</button>

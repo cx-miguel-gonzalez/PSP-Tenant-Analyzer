@@ -18,6 +18,7 @@
   </ul>
 
   <form method="post" action="{{ url_for('presets_delete_apply') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% for p in presets %}<input type="hidden" name="preset_ids" value="{{ p.id }}">{% endfor %}
     <div class="button-row">
       <button type="submit" class="btn btn-danger">Delete Presets</button>

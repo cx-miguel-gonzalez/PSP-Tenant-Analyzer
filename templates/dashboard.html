@@ -7,6 +7,7 @@
 </div>
 
 <form method="post" action="{{ url_for('set_look_back') }}" class="look-back-bar">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label class="field-label look-back-label">Look Back
     <select name="look_back_days" class="select-input">
       {% for days, label in look_back_options %}
@@ -37,6 +38,7 @@
 </div>
 
 <form method="post" action="{{ url_for('analyze_tenant') }}" class="toolbar-row">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button type="submit" class="btn btn-accent">Analyze Tenant Configurations</button>
   <span class="section-note analyze-note">Evaluates the enabled rules in <a href="{{ url_for('analyzer_config') }}">Analyzer Config</a> against the synced data.</span>
 </form>

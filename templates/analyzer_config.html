@@ -19,6 +19,7 @@
 {% for rule_section in rule_sections %}
 {% if active_tab == rule_section.slug %}
 <form method="post" action="{{ url_for('analyzer_config_save') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="active_tab" value="{{ rule_section.slug }}">
   <div class="toolbar-row">
     <button type="submit" class="btn btn-accent">Save Changes</button>

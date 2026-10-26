@@ -11,6 +11,7 @@
 
 <div class="section-block section-block-narrow">
   <form method="post" action="{{ url_for('presets_compare_combine_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label class="field-label">Preset name
       <input type="text" name="preset_name" value="{{ suggested_name }}" required>
     </label>

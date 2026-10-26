@@ -40,6 +40,7 @@
     <div class="section-block"><p class="empty-state">These presets select the exact same set of queries.</p></div>
   {% else %}
   <form method="post" action="{{ url_for('presets_compare_combine') }}" id="combine-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="a_id" value="{{ a_id }}">
     <input type="hidden" name="b_id" value="{{ b_id }}">
 

@@ -11,8 +11,10 @@ a rewrite.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -41,6 +43,59 @@ class CxEndpointUnavailable(CxApiError):
     message rather than a hard sync failure."""
 
 
+# The base/IAM URLs come from the login form, so they're limited to Checkmarx
+# One hosts -- otherwise a page that posts to the local /login could make this
+# app send requests (and credentials) to any internal or external address.
+# Private Checkmarx One instances on another domain are added via
+# CX_ALLOWED_HOSTS: comma-separated exact hosts, or ".suffix" entries.
+_ALLOWED_HOST_SUFFIXES = (".checkmarx.net",)
+_TENANT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
+
+
+def _allowed_hosts() -> tuple[str, ...]:
+    extra = os.environ.get("CX_ALLOWED_HOSTS", "")
+    return _ALLOWED_HOST_SUFFIXES + tuple(h.strip().lower() for h in extra.split(",") if h.strip())
+
+
+def _host_allowed(host: str) -> bool:
+    for entry in _allowed_hosts():
+        if entry.startswith("."):
+            if host.endswith(entry) or host == entry[1:]:
+                return True
+        elif host == entry:
+            return True
+    return False
+
+
+def safe_endpoint(url: str) -> str:
+    """The https origin (plus path) of a Checkmarx One base/IAM URL, rebuilt
+    from its parsed parts so userinfo, query and fragment can't ride along.
+    Raises CxApiError for anything else."""
+    try:  # malformed input (e.g. an unbalanced "[") makes urlsplit/.port raise ValueError
+        parsed = urlsplit((url or "").strip())
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError:
+        parsed, host, port = None, "", -1
+    if port == -1 or parsed.scheme != "https" or not host or parsed.username or parsed.password:
+        raise CxApiError(f"Invalid Checkmarx One URL: {url!r} (must be an https:// address).")
+    if not _host_allowed(host):
+        raise CxApiError(
+            f"{host} is not a Checkmarx One host. If it is your private Checkmarx One "
+            "instance, add it to CX_ALLOWED_HOSTS in .env."
+        )
+    netloc = host if port in (None, 443) else f"{host}:{port}"
+    return f"https://{netloc}{parsed.path.rstrip('/')}"
+
+
+def safe_tenant(tenant: str) -> str:
+    """A tenant (Keycloak realm) name, URL-encoded for use as a path segment."""
+    tenant = (tenant or "").strip()
+    if not _TENANT_RE.fullmatch(tenant) or ".." in tenant:
+        raise CxApiError(f"Invalid tenant name: {tenant!r}.")
+    return quote(tenant, safe="")
+
+
 def _api_key_exchange_audience() -> str:
     """Public (non-secret) audience name Checkmarx One's IAM uses for the
     refresh-token grant that exchanges a tenant API key for an access token.
@@ -60,7 +115,7 @@ def get_access_token(
 
     Returns (access_token, expires_in_seconds).
     """
-    token_url = f"{iam_url.rstrip('/')}/auth/realms/{tenant}/protocol/openid-connect/token"
+    token_url = f"{safe_endpoint(iam_url)}/auth/realms/{safe_tenant(tenant)}/protocol/openid-connect/token"
 
     if method == "client_credentials":
         if not client_id or not client_secret:
@@ -108,7 +163,7 @@ def _headers(token: str) -> dict:
 def _request(
     method: str, base_url: str, token: str, path: str, best_effort: bool = False, **kwargs
 ) -> requests.Response:
-    url = f"{base_url.rstrip('/')}{path}"
+    url = f"{safe_endpoint(base_url)}{path}"
     try:
         resp = requests.request(
             method, url, headers=_headers(token), timeout=REQUEST_TIMEOUT, **kwargs
