@@ -1,6 +1,6 @@
 Flask>=3.0
 Flask-WTF>=1.2,<1.3
-requests>=2.31
+requests>=2.34.2
 python-dotenv>=1.0
 # Pinned to a release verified on Python 3.9; reportlab 5.x requires 3.10+.
 reportlab>=4.2,<4.3
