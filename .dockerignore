@@ -1,0 +1,19 @@
+# Keep secrets, local tenant data and dev tooling out of the image.
+.env
+.envrc
+data/
+.git/
+.github/
+.venv/
+venv/
+.vscode/
+.claude/
+.checkmarx/
+Project/
+fuzz/
+__pycache__/
+*.py[cod]
+*.log
+Dockerfile
+docker-compose.yml
+.dockerignore

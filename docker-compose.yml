@@ -1,0 +1,28 @@
+services:
+  tenant-analyzer:
+    build: .
+    image: psp-tenant-analyzer:latest
+    # Published on localhost only; change to "8888:8888" to expose it on the network.
+    ports:
+      - "127.0.0.1:8888:8888"
+    # Same variables as .env.example; the file is optional.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - tenant-data:/data
+    # The app needs no Linux capabilities and never escalates privileges.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/static/css/style.css', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  tenant-data:
