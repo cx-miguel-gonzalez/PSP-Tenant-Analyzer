@@ -108,6 +108,7 @@ p { line-height: 1.5; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.brand-text .brand-version { font-size: .68rem; color: rgba(252,249,254,0.45); letter-spacing: .02em; }
 
 .nav-item {
   display: flex;
@@ -733,6 +734,9 @@ tr.scan-row-low-duration td { color: var(--flash-success-text); }
 }
 .login-brand { display: flex; align-items: center; gap: .75rem; margin-bottom: .5rem; }
 .login-brand h1 { font-size: 1.3rem; }
+.login-brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.login-brand-text h1 { margin: 0; }
+.login-brand-text .brand-version { font-size: .75rem; color: var(--cx-text-muted); }
 .login-subtitle { color: var(--cx-text-muted); font-size: .85rem; margin-top: 0; }
 .login-form, .login-env-form { display: flex; flex-direction: column; gap: .85rem; margin-top: 1rem; }
 .login-form label, .auth-method { display: flex; flex-direction: column; gap: .3rem; font-size: .82rem; font-weight: 600; color: var(--cx-text-muted); }

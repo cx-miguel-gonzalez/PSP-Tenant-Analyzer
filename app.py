@@ -32,6 +32,7 @@ import health
 import pdf_report
 import rule_catalog
 import scan_errors
+from version import __version__
 from sections import SECTIONS, SECTIONS_BY_KEY, DASHBOARD_ICON, ANALYZER_CONFIG_ICON, RECOMMENDATIONS_ICON
 
 load_dotenv()
@@ -1929,6 +1930,7 @@ def _release_tenant_db(exc=None):
 def inject_globals():
     return {
         "now": datetime.utcnow(),
+        "app_version": __version__,
         "logged_in": _current_session() is not None,
         "current_session": _current_session(),
         "sections": SECTIONS,
