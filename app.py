@@ -2059,6 +2059,26 @@ def inject_globals():
     }
 
 
+# Sync functions append their per-request failures to the message after one
+# of these markers, joined with "; " (see sections.py).
+_SYNC_ERROR_MARKERS = (" Incomplete: ", " Not available: ")
+
+
+@app.template_filter("sync_message_parts")
+def _sync_message_parts_filter(sync_meta):
+    """(summary, errors) for a section's sync message, so the sync strip can
+    show the short summary inline and the errors -- which can run to
+    thousands of entries -- behind a button instead."""
+    message = (sync_meta["message"] if sync_meta else None) or ""
+    if sync_meta and sync_meta["status"] == "error":
+        return "Sync failed.", [message.removeprefix("Sync failed: ")]
+    for marker in _SYNC_ERROR_MARKERS:
+        summary, found, tail = message.partition(marker)
+        if found:
+            return summary, [e for e in tail.split("; ") if e.strip()]
+    return message, []
+
+
 if __name__ == "__main__":
     # Debug mode (Werkzeug's interactive debugger + reloader) is opt-in via
     # FLASK_DEBUG=1 in .env, which Flask reads on startup; off by default.

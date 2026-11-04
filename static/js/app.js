@@ -1263,8 +1263,32 @@ function initAnalyzerConfig() {
   });
 }
 
+function wireSyncErrorDialogs() {
+  document.querySelectorAll(".sync-error-btn").forEach((btn) => {
+    const dialog = document.getElementById(btn.dataset.dialogId);
+    if (!dialog || typeof dialog.showModal !== "function") return;
+    btn.addEventListener("click", () => dialog.showModal());
+    // A click on the backdrop lands on the <dialog> itself, not its content.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
+}
+
+// Inline onsubmit handlers are blocked by the CSP (script-src 'self'), so a
+// form asks for confirmation through a data-confirm attribute instead.
+function wireConfirmForms() {
+  document.querySelectorAll("form[data-confirm]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireSectionSync();
+  wireSyncErrorDialogs();
+  wireConfirmForms();
   wireSyncAll();
   wireCategoryToggles();
   initCompareSelection();

@@ -444,6 +444,25 @@ tr[data-analyzer-level] { cursor: help; }
 .sync-strip-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .sync-strip-timestamp { color: var(--cx-text-muted); }
 .sync-strip-message { font-style: italic; }
+.sync-error-btn {
+  background: var(--badge-error-bg); color: var(--badge-error-text); border: 1px solid var(--badge-error-text);
+  max-width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sync-error-btn:hover { background: var(--badge-error-text); color: #fff; }
+.sync-error-preview { font-weight: 400; margin-left: .3rem; }
+.sync-error-dialog {
+  width: min(900px, calc(100vw - 32px)); max-height: 85vh; padding: 0; overflow-y: auto;
+  border: 1px solid var(--cx-border); border-radius: 10px;
+  background: var(--cx-card-bg); color: var(--cx-text);
+}
+.sync-error-dialog::backdrop { background: rgba(20, 9, 33, 0.45); }
+.sync-error-dialog .detail-panel-header { position: sticky; top: 0; background: var(--cx-card-bg); }
+.sync-error-list { margin: 0; padding: 1rem 1.1rem 1.1rem 2.6rem; font-size: .8rem; }
+.sync-error-list li { margin-bottom: .5rem; color: var(--cx-text-muted); }
+.sync-error-list pre {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem;
+  color: var(--badge-error-text); background: var(--badge-error-bg); border-radius: 6px; padding: .45rem .6rem;
+}
 .sync-strip-progress { font-size: .78rem; color: var(--cx-text-muted); margin: -.5rem 0 1rem; min-height: 1em; }
 .sync-progress-track {
   height: 8px;
