@@ -1,5 +1,5 @@
 Flask>=3.0
-Flask-WTF>=1.2,<1.3
+Flask-WTF>=1.3.0,<1.4
 requests>=2.31
 # 2.x for Retry(backoff_max=...) in cx_client's shared HTTP session.
 urllib3>=2.0
