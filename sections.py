@@ -95,7 +95,7 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     if days_back and days_back > 0:
         since = datetime.now(timezone.utc) - timedelta(days=days_back)
         window_note = f"past {days_back} days"
-    scans = cx_client.list_scans(sess["base_url"], sess["token"], limit=5000, since=since)
+    scans = cx_client.list_scans(sess["base_url"], sess["token"], since=since)
 
     # LOC is an enrichment from a separate batch call, not part of /api/scans
     # itself -- if it fails, still complete the sync (Scan Health doesn't

@@ -920,8 +920,11 @@ function initWorkflowPanel() {
   const title = document.getElementById("workflow-panel-title");
   const meta = document.getElementById("workflow-panel-meta");
   const body = document.getElementById("workflow-panel-body");
-  const triggers = document.querySelectorAll(".workflow-btn");
-  if (!panel || !backdrop || !closeBtn || !title || !meta || !body || !triggers.length) return;
+  // Delegated from the table rather than bound per button: the Scans
+  // Explorer detaches every row outside the current page, so a
+  // querySelectorAll here would only find the first page's buttons.
+  const table = document.getElementById("scans-table");
+  if (!panel || !backdrop || !closeBtn || !title || !meta || !body || !table) return;
 
   function openPanel() {
     backdrop.hidden = false;
@@ -988,25 +991,25 @@ function initWorkflowPanel() {
     body.appendChild(list);
   }
 
-  triggers.forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const scanId = btn.dataset.scanId;
-      title.textContent = "Scan Workflow";
-      meta.textContent = `Scan ${scanId}`;
-      renderMessage("Loading...");
-      openPanel();
-      try {
-        const resp = await fetch(`/scans/${encodeURIComponent(scanId)}/workflow`);
-        const data = await resp.json();
-        if (!resp.ok) {
-          renderMessage((data && data.error) || "Could not load the scan workflow.");
-          return;
-        }
-        renderSteps(data.steps);
-      } catch (err) {
-        renderMessage("Could not load the scan workflow.");
+  table.addEventListener("click", async (event) => {
+    const btn = event.target.closest(".workflow-btn");
+    if (!btn) return;
+    const scanId = btn.dataset.scanId;
+    title.textContent = "Scan Workflow";
+    meta.textContent = `Scan ${scanId}`;
+    renderMessage("Loading...");
+    openPanel();
+    try {
+      const resp = await fetch(`/scans/${encodeURIComponent(scanId)}/workflow`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        renderMessage((data && data.error) || "Could not load the scan workflow.");
+        return;
       }
-    });
+      renderSteps(data.steps);
+    } catch (err) {
+      renderMessage("Could not load the scan workflow.");
+    }
   });
 
   closeBtn.addEventListener("click", closePanel);

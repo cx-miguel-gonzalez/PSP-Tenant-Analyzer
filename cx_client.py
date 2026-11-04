@@ -396,10 +396,14 @@ def list_scans(base_url: str, token: str, limit: int | None = None, since=None) 
     """Returns scans newest-first. `limit` caps the total pulled. `since` (a
     datetime) stops paginating as soon as a page's scans are older than it --
     safe because the API is sorted by -created_at, so once one scan is older
-    than the cutoff, every scan after it is too."""
+    than the cutoff, every scan after it is too.
+
+    Not bound by MAX_PAGES, so a large tenant isn't silently truncated; a page
+    that brings no new scan IDs (an API ignoring `offset`) ends the loop instead."""
     all_items = []
+    seen_ids = set()
     offset = 0
-    for _ in range(MAX_PAGES):
+    while True:
         page_limit = PAGE_SIZE if limit is None else min(PAGE_SIZE, max(0, limit - len(all_items)))
         if page_limit <= 0:
             break
@@ -411,6 +415,10 @@ def list_scans(base_url: str, token: str, limit: int | None = None, since=None) 
             params={"offset": offset, "limit": page_limit, "sort": "-created_at"},
         )
         items, total = _unwrap_page(resp.json(), list_keys=("scans", "data", "items"))
+        page_ids = {str(item.get("id")) for item in items if item.get("id") is not None}
+        if page_ids and page_ids <= seen_ids:
+            break
+        seen_ids |= page_ids
 
         hit_cutoff = False
         if since is not None:
@@ -448,7 +456,9 @@ def get_sast_metadata(base_url: str, token: str, scan_ids: list) -> dict:
     completed SAST engine, etc.) just has no entry -- that's normal, not
     an error."""
     loc_by_id = {}
-    batch_size = 100
+    # The API rejects more than ~50 ids per call (400 "Too many ids in url",
+    # code 3102); 50 is the largest size confirmed against a live tenant.
+    batch_size = 50
     for i in range(0, len(scan_ids), batch_size):
         batch = [sid for sid in scan_ids[i:i + batch_size] if sid]
         if not batch:
