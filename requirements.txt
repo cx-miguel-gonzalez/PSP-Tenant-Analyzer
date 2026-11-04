@@ -7,4 +7,4 @@ python-dotenv>=1.0
 # Encrypts saved login credentials (credential_store.py).
 cryptography>=42
 # Pinned to a release verified on Python 3.9; reportlab 5.x requires 3.10+.
-reportlab>=4.2,<4.3
+reportlab>=4.2.5,<4.3
