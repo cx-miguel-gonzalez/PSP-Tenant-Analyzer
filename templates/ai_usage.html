@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}AI Usage - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% set sync_extra %}
+<span class="section-note">Usage, top consumers and the trend cover the last {{ period_days }} days.</span>
+{% endset %}
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+{% if not has_data %}
+  <div class="section-block">
+    <p class="empty-state">No AI credit data cached yet. Click "Sync Now" above to pull it from the tenant.</p>
+  </div>
+{% else %}
+<div class="section-block">
+  <h2>Credits</h2>
+  <div class="kpi-grid">
+
+    <div class="kpi-card">
+      <h3>Credits Used / Credits Available</h3>
+      <p class="credit-headline">
+        <span class="credit-used">{{ used | credits }}</span>
+        <span class="credit-sep">/</span>
+        <span class="credit-available">{{ available | credits }}</span>
+      </p>
+      <p class="section-note">used / available, of {{ total | credits }} total credits</p>
+      <div class="credit-meter" role="meter" aria-label="Credits used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ used_pct | round(1) }}">
+        <div class="credit-meter-fill" style="width: {{ used_pct | round(1) }}%;"></div>
+      </div>
+      <p class="section-note">
+        {{ used_pct | round(1) }}% consumed
+        {% if enforcement.cutoffThresholdPct is not none %}&middot; usage is cut off at {{ enforcement.cutoffThresholdPct }}%{% endif %}
+      </p>
+      {% if license %}
+      <p class="section-note">
+        License: <span class="badge badge-info">{{ (license.state or 'unknown') | replace('_', ' ') }}</span>
+        {% if license.startDate %}{{ license.startDate[:10] }}{% endif %}{% if license.endDate %} &ndash; {{ license.endDate[:10] }}{% endif %}
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card">
+      <h3>Activity</h3>
+      <div class="stat-row">
+        <div class="stat-tile">
+          <span class="stat-value">{{ actions_performed if actions_performed is not none else '—' }}</span>
+          <span class="stat-label">Total Actions</span>
+        </div>
+        <div class="stat-tile">
+          <span class="stat-value">{{ burn_rate | credits }}</span>
+          <span class="stat-label">Burn Rate<br>(credits / month)</span>
+        </div>
+        <div class="stat-tile">
+          <span class="stat-value">{{ actions_available if actions_available is not none else '—' }}</span>
+          <span class="stat-label">Estimated Actions<br>Remaining</span>
+        </div>
+      </div>
+      {% if depletion_date %}
+      <p class="section-note">At the current burn rate, credits run out around <strong>{{ depletion_date[:10] }}</strong>.</p>
+      {% endif %}
+      {% if rates %}
+      <p class="section-note">
+        The {{ available | credits }} available credits would cover
+        {% for r in rates %}<strong>{{ r.remaining if r.remaining is not none else '—' }}</strong> {{ r.name }} action(s) ({{ r.credits | credits }} credit{{ '' if r.credits == 1 else 's' }} each){% if not loop.last %} or {% endif %}{% endfor %}.
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card kpi-card-wide">
+      <h3>Credit Usage by Action <span class="section-note">(last {{ period_days }} days)</span></h3>
+      {% if by_action %}
+      <table class="data-table">
+        <thead>
+          <tr><th>Action</th><th>Actions</th><th>Credits / Action</th><th>Credits</th><th class="hbar-col">Share</th></tr>
+        </thead>
+        <tbody>
+          {% for a in by_action %}
+          <tr>
+            <td>{{ a.name }}</td>
+            <td>{{ a.count }}</td>
+            <td>{{ a.credits_per_action | credits }}</td>
+            <td>{{ a.credits | credits }}</td>
+            <td class="hbar-col">
+              <div class="hbar-track"><div class="hbar-fill" style="width: {{ (a.credits / max_action_credits * 100) | round(1) }}%;"></div></div>
+              <span class="hbar-value">{{ a.pct | round | int }}%</span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty-state">No AI actions used in the last {{ period_days }} days.</p>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card kpi-card-wide">
+      <h3>Credit Usage over Time <span class="section-note">(credits per day, last {{ period_days }} days &middot; {{ trend_total | credits }} total)</span></h3>
+      {% if not trend_synced %}
+        <p class="empty-state">Usage history isn't available on this tenant.</p>
+      {% elif not trend_total %}
+        <p class="empty-state">No credits used in the last {{ period_days }} days.</p>
+      {% else %}
+      {% set bar_w = 8 %}{% set chart_h = 160 %}
+      <div class="trend-chart">
+        <div class="trend-axis-y"><span>{{ trend_max | credits }}</span><span>0</span></div>
+        <svg class="trend-svg" viewBox="0 0 {{ trend | length * bar_w }} {{ chart_h }}" preserveAspectRatio="none" role="img"
+             aria-label="Credits used per day over the last {{ period_days }} days">
+          <line class="trend-baseline" x1="0" y1="{{ chart_h }}" x2="{{ trend | length * bar_w }}" y2="{{ chart_h }}"/>
+          {% for p in trend %}{% if p.credits %}
+          {% set h = [p.credits / trend_max * chart_h, 2] | max %}
+          <rect class="trend-bar" x="{{ loop.index0 * bar_w + 1 }}" y="{{ chart_h - h }}" width="{{ bar_w - 2 }}" height="{{ h }}">
+            <title>{{ p.date }}: {{ p.credits | credits }} credit{{ '' if p.credits == 1 else 's' }}</title>
+          </rect>
+          {% endif %}{% endfor %}
+        </svg>
+        <div class="trend-axis-x">
+          <span>{{ trend[0].date }}</span>
+          <span>{{ trend[trend | length // 2].date }}</span>
+          <span>{{ trend[-1].date }}</span>
+        </div>
+      </div>
+      <details class="trend-table">
+        <summary>Show days with usage as a table</summary>
+        <table class="data-table">
+          <thead><tr><th>Date</th><th>Credits</th></tr></thead>
+          <tbody>
+            {% for p in trend | reverse if p.credits %}
+            <tr><td>{{ p.date }}</td><td>{{ p.credits | credits }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card kpi-card-wide" id="top-consumers">
+      <h3>Top Consumers <span class="section-note">(last {{ period_days }} days)</span></h3>
+      <nav class="section-tabs" aria-label="Top consumers grouping">
+        {% for g in consumer_groups %}
+        <a class="section-tab{{ ' active' if g == consumer_group else '' }}" href="{{ url_for('section', key='ai_usage', group=g) }}#top-consumers"{% if g == consumer_group %} aria-current="page"{% endif %}>{{ g | capitalize }}</a>
+        {% endfor %}
+      </nav>
+      {% if not consumers_synced %}
+        <p class="empty-state">Top consumers by {{ consumer_group }} aren't available on this tenant.</p>
+      {% elif consumers.rows %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th><th>{{ consumer_group | capitalize }}</th>
+            {% for action in consumers.actions %}<th>{{ action }}</th>{% endfor %}
+            <th>Total Credits</th><th class="hbar-col"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in consumers.rows %}
+          <tr{{ flag('consumer:' ~ consumer_group ~ ':' ~ row.name) }}>
+            <td>{{ loop.index }}</td>
+            <td>{{ row.name }}</td>
+            {% for action in consumers.actions %}<td>{{ row.by_action.get(action, 0) | credits }}</td>{% endfor %}
+            <td>{{ row.total | credits }}</td>
+            <td class="hbar-col"><div class="hbar-track"><div class="hbar-fill" style="width: {{ (row.total / consumers.max_total * 100) | round(1) }}%;"></div></div></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty-state">No credit usage by {{ consumer_group }} in the last {{ period_days }} days.</p>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endif %}
+{% endblock %}

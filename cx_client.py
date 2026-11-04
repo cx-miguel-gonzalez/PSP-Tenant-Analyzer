@@ -17,6 +17,9 @@ from datetime import datetime
 from urllib.parse import quote, urlsplit
 
 import requests
+from http.cookiejar import DefaultCookiePolicy
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,44 @@ DEFAULT_IAM_URL = "https://iam.checkmarx.net"
 REQUEST_TIMEOUT = 30
 PAGE_SIZE = 100
 MAX_PAGES = 200  # safety cap so a misbehaving API can't loop forever
+
+# Retries for transient failures seen on large syncs: connection resets
+# (errno 104), brief DNS outages, timeouts, and 429/5xx throttling. Connect
+# errors are retried for every method (the request never reached the
+# server); read errors and retryable statuses only for GET/HEAD, so a
+# POST/PATCH/DELETE that may already have been applied is never re-sent.
+# Backoff is 0s, 2s, 4s, 8s... capped at 30s; a Retry-After header wins.
+# raise_on_status=False hands the last response back once retries run out,
+# so _request still reports its status and body as before.
+_RETRY = Retry(
+    total=5,
+    connect=5,
+    read=3,
+    status=4,
+    backoff_factor=1,
+    backoff_max=30,
+    status_forcelist=(429, 502, 503, 504),
+    allowed_methods=frozenset({"GET", "HEAD"}),
+    respect_retry_after_header=True,
+    raise_on_status=False,
+)
+
+
+def _build_http_session() -> requests.Session:
+    """One shared Session so requests reuse pooled keep-alive connections
+    instead of opening a new TLS connection per call. Cookies are refused:
+    every call authenticates with its own bearer token, and a shared jar
+    would otherwise carry one tenant's cookies into another tenant's calls."""
+    http = requests.Session()
+    http.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+    # Pool sized for gunicorn's 8 request threads plus concurrent sync threads.
+    adapter = HTTPAdapter(max_retries=_RETRY, pool_connections=4, pool_maxsize=16)
+    http.mount("https://", adapter)
+    http.mount("http://", adapter)
+    return http
+
+
+_HTTP = _build_http_session()
 
 
 class CxApiError(Exception):
@@ -88,12 +129,18 @@ def safe_endpoint(url: str) -> str:
     return f"https://{netloc}{parsed.path.rstrip('/')}"
 
 
-def safe_tenant(tenant: str) -> str:
-    """A tenant (Keycloak realm) name, URL-encoded for use as a path segment."""
+def validated_tenant(tenant: str) -> str:
+    """A tenant (Keycloak realm) name, stripped and checked against the
+    realm-name pattern. Raises CxApiError for anything else."""
     tenant = (tenant or "").strip()
     if not _TENANT_RE.fullmatch(tenant) or ".." in tenant:
         raise CxApiError(f"Invalid tenant name: {tenant!r}.")
-    return quote(tenant, safe="")
+    return tenant
+
+
+def safe_tenant(tenant: str) -> str:
+    """A tenant (Keycloak realm) name, URL-encoded for use as a path segment."""
+    return quote(validated_tenant(tenant), safe="")
 
 
 def _api_key_exchange_audience() -> str:
@@ -137,7 +184,7 @@ def get_access_token(
         raise CxApiError(f"Unknown auth method: {method}")
 
     try:
-        resp = requests.post(token_url, data=data, timeout=REQUEST_TIMEOUT)
+        resp = _HTTP.post(token_url, data=data, timeout=REQUEST_TIMEOUT)
     except requests.RequestException as exc:
         raise CxApiError(f"Could not reach IAM endpoint: {exc}") from exc
 
@@ -165,7 +212,7 @@ def _request(
 ) -> requests.Response:
     url = f"{safe_endpoint(base_url)}{path}"
     try:
-        resp = requests.request(
+        resp = _HTTP.request(
             method, url, headers=_headers(token), timeout=REQUEST_TIMEOUT, **kwargs
         )
     except requests.RequestException as exc:
@@ -396,10 +443,14 @@ def list_scans(base_url: str, token: str, limit: int | None = None, since=None) 
     """Returns scans newest-first. `limit` caps the total pulled. `since` (a
     datetime) stops paginating as soon as a page's scans are older than it --
     safe because the API is sorted by -created_at, so once one scan is older
-    than the cutoff, every scan after it is too."""
+    than the cutoff, every scan after it is too.
+
+    Not bound by MAX_PAGES, so a large tenant isn't silently truncated; a page
+    that brings no new scan IDs (an API ignoring `offset`) ends the loop instead."""
     all_items = []
+    seen_ids = set()
     offset = 0
-    for _ in range(MAX_PAGES):
+    while True:
         page_limit = PAGE_SIZE if limit is None else min(PAGE_SIZE, max(0, limit - len(all_items)))
         if page_limit <= 0:
             break
@@ -411,6 +462,10 @@ def list_scans(base_url: str, token: str, limit: int | None = None, since=None) 
             params={"offset": offset, "limit": page_limit, "sort": "-created_at"},
         )
         items, total = _unwrap_page(resp.json(), list_keys=("scans", "data", "items"))
+        page_ids = {str(item.get("id")) for item in items if item.get("id") is not None}
+        if page_ids and page_ids <= seen_ids:
+            break
+        seen_ids |= page_ids
 
         hit_cutoff = False
         if since is not None:
@@ -448,7 +503,9 @@ def get_sast_metadata(base_url: str, token: str, scan_ids: list) -> dict:
     completed SAST engine, etc.) just has no entry -- that's normal, not
     an error."""
     loc_by_id = {}
-    batch_size = 100
+    # The API rejects more than ~50 ids per call (400 "Too many ids in url",
+    # code 3102); 50 is the largest size confirmed against a live tenant.
+    batch_size = 50
     for i in range(0, len(scan_ids), batch_size):
         batch = [sid for sid in scan_ids[i:i + batch_size] if sid]
         if not batch:
@@ -679,3 +736,54 @@ def list_projects(base_url: str, token: str) -> list:
 
 def list_applications(base_url: str, token: str) -> list:
     return _paginated_get(base_url, token, "/api/applications", list_keys=("applications", "data", "items"))
+
+
+# ---------------------------------------------------------------------------
+# AI Usage -- the /api/credits/* endpoints behind the Checkmarx One license
+# page (shapes confirmed from a captured browser session and a live tenant).
+# Credit amounts come back as strings ("398"), counts as ints, and an empty
+# top-consumers view as "items": null. A tenant without AI credits may not
+# serve these at all, so every call is best-effort.
+# ---------------------------------------------------------------------------
+CREDITS_PERIOD = "last_90_days"
+CREDITS_PERIOD_DAYS = 90
+TOP_CONSUMER_GROUPS = ("user", "group", "application", "project")
+
+
+def _credits_get(base_url: str, token: str, path: str, params: dict | None = None):
+    resp = _request("GET", base_url, token, f"/api/credits{path}", params=params, best_effort=True)
+    return resp.json()
+
+
+def get_credits_info(base_url: str, token: str) -> dict:
+    return _credits_get(base_url, token, "/info")
+
+
+def get_credits_license_status(base_url: str, token: str) -> dict:
+    return _credits_get(base_url, token, "/license/status")
+
+
+def get_credits_burnrate(base_url: str, token: str) -> dict:
+    return _credits_get(base_url, token, "/burnrate")
+
+
+def get_credits_burnrate_trend(base_url: str, token: str, start, end) -> list:
+    return _credits_get(
+        base_url, token, "/burnrate/trend",
+        params={"from": start.strftime("%Y-%m-%d"), "to": end.strftime("%Y-%m-%d")},
+    )
+
+
+def get_credits_action_rates(base_url: str, token: str) -> dict:
+    return _credits_get(base_url, token, "/action-rates")
+
+
+def get_credits_by_action(base_url: str, token: str) -> dict:
+    return _credits_get(base_url, token, "/consumption/by-action", params={"period": CREDITS_PERIOD})
+
+
+def get_credits_top_consumers(base_url: str, token: str, group_by: str) -> dict:
+    return _credits_get(
+        base_url, token, "/consumption/top-consumers",
+        params={"groupBy": group_by, "period": CREDITS_PERIOD},
+    )

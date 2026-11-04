@@ -62,4 +62,14 @@ podman run -d --name tenant-analyzer \
 
 The container runs gunicorn with a single worker on purpose. Sign-ins and sync progress live in that process's memory, so don't scale it beyond one worker or replica. Set `FLASK_SECRET_KEY` if you want sessions to survive a container restart.
 
+### Saved sign-ins
+
+Set `CX_CREDENTIALS_KEY` in `.env` and the login page remembers every tenant you sign in to through the form, so signing out and back in is one click. The tenant, URLs and API key or client secret are encrypted with that key (Fernet) into `data/saved_credentials.enc`, readable only by its owner. They're never written to the tenant databases, and no part of the secret is ever sent back to the browser. Saved entries are re-validated whenever they're read, and any that fail are ignored. The key stays outside the data folder, so a copy of `data/` alone can't be decrypted. Generate a key with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Use **Forget** on the login page to remove a saved tenant. If the key changes or is lost, the saved sign-ins are ignored and you sign in again once per tenant.
+
 Some endpoints (SCM connections, ticketing "feedback" profiles, policy management) are best-effort against Checkmarx One's documented API surface and haven't been confirmed against a live tenant -- see the endpoint-confidence notes in `cx_client.py`. If one 404s on your tenant, that section's sync degrades to an empty state with an explanatory message instead of failing.

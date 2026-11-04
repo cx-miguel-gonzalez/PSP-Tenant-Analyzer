@@ -1,4 +1,4 @@
-"""Single source of truth for the console's 8 review sections: sidebar
+"""Single source of truth for the console's 9 review sections: sidebar
 entries, routes, and sync orchestration are all generated from this list
 instead of being hand-duplicated per section in app.py."""
 from __future__ import annotations
@@ -22,7 +22,8 @@ _ICON_TICKET = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 _ICON_SHIELD = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 _ICON_LAYERS = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 9 5-9 5-9-5 9-5Z" stroke-linejoin="round"/><path d="m3 13 9 5 9-5" stroke-linejoin="round"/></svg>"""
 _ICON_CLOCK = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
-_ICON_HOME = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 11 9-7 9 7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
+_ICON_SPARKLE = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z" stroke-linejoin="round"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" stroke-linejoin="round"/></svg>"""
+_ICON_HOME ="""<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 11 9-7 9 7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 _ICON_SLIDERS = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h6M14 6h6M4 12h10M18 12h2M4 18h4M12 18h8" stroke-linecap="round"/><circle cx="12" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></svg>"""
 
 
@@ -83,6 +84,26 @@ def _sync_preset_management(sess: dict, refresh_catalog: bool = False, progress=
     return count, f"Synced {count} preset(s){catalog_note}."
 
 
+# cx_client already retries each request through brief resets and DNS blips,
+# so this many back-to-back requests failing with no HTTP response at all
+# means the network or tenant is down. Per-scan loops stop there instead of
+# spending ~30s of retries on each of thousands of remaining scans.
+MAX_CONSECUTIVE_CONNECTION_FAILURES = 5
+
+
+def _is_connection_failure(exc: cx_client.CxApiError) -> bool:
+    """No status code means the request never got an HTTP response (reset,
+    DNS failure, timeout) -- as opposed to an API error like 403 or 500."""
+    return exc.status_code is None
+
+
+def _connection_stop_note(remaining: int, what: str) -> str:
+    return (
+        f"Stopped after {MAX_CONSECUTIVE_CONNECTION_FAILURES} consecutive connection failures: "
+        f"{remaining} {what}."
+    )
+
+
 def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     def report(current, total, message):
         if progress is not None:
@@ -94,7 +115,7 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     if days_back and days_back > 0:
         since = datetime.now(timezone.utc) - timedelta(days=days_back)
         window_note = f"past {days_back} days"
-    scans = cx_client.list_scans(sess["base_url"], sess["token"], limit=5000, since=since)
+    scans = cx_client.list_scans(sess["base_url"], sess["token"], since=since)
 
     # LOC is an enrichment from a separate batch call, not part of /api/scans
     # itself -- if it fails, still complete the sync (Scan Health doesn't
@@ -124,18 +145,27 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     cached = db.cached_workflow_scan_ids()
     to_fetch = [str(s["id"]) for s in db.failed_partial_scans() if str(s["id"]) not in cached]
     unavailable = 0
+    connection_failures = 0
+    skipped = 0
     for i, scan_id in enumerate(to_fetch, start=1):
         report(i - 1, len(to_fetch), f"Fetching workflows of failed/partial scans... {i} of {len(to_fetch)}")
         try:
             db.save_scan_workflow(scan_id, cx_client.get_scan_workflow(sess["base_url"], sess["token"], scan_id))
-        except cx_client.CxApiError:
+            connection_failures = 0
+        except cx_client.CxApiError as exc:
             logger.exception("Failed to fetch workflow for scan %s", scan_id)
             unavailable += 1
+            connection_failures = connection_failures + 1 if _is_connection_failure(exc) else 0
+            if connection_failures >= MAX_CONSECUTIVE_CONNECTION_FAILURES:
+                skipped = len(to_fetch) - i
+                break
     message = f"Synced {count} scan(s) ({window_note})."
     if to_fetch:
-        message += f" Fetched {len(to_fetch) - unavailable} failed/partial scan workflow(s)."
+        message += f" Fetched {len(to_fetch) - unavailable - skipped} failed/partial scan workflow(s)."
     if unavailable:
         message += f" {unavailable} workflow(s) unavailable."
+    if skipped:
+        message += " Incomplete: " + _connection_stop_note(skipped, "workflow(s) not fetched (the next sync fetches them)")
     return count, message
 
 
@@ -238,8 +268,21 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
     errors = []
     details_available = True
     evaluations_available = True
+    connection_failures = 0
 
-    for scan in scans_to_sync:
+    def track(exc=None):
+        nonlocal connection_failures
+        if exc is not None and _is_connection_failure(exc):
+            connection_failures += 1
+        else:
+            connection_failures = 0
+
+    for scan_index, scan in enumerate(scans_to_sync, start=1):
+        if connection_failures >= MAX_CONSECUTIVE_CONNECTION_FAILURES:
+            errors.append(_connection_stop_note(
+                len(scans_to_sync) - scan_index + 1, "scan(s) not checked for violations or evaluations",
+            ))
+            break
         project_id = scan["project_id"]
         scan_id = scan["id"]
         context = {
@@ -272,11 +315,13 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
                             violations.append({**context, "raw": violation})
                     else:
                         violations.append({**context, "raw": policy_result})
+                track()
             except cx_client.CxEndpointUnavailable as exc:
                 details_available = False
                 errors.append(f"Violations: {exc}")
             except cx_client.CxApiError as exc:
                 errors.append(f"Violations for {scan_id}: {exc}")
+                track(exc)
             completed_steps += 1
             report(completed_steps, total_steps, f"Loaded violations for {scan['project_name'] or project_id}.")
         else:
@@ -290,11 +335,13 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
                     sess["base_url"], sess["token"], project_id, scan_id
                 )
                 evaluations.append({**context, "raw": evaluation})
+                track()
             except cx_client.CxEndpointUnavailable as exc:
                 evaluations_available = False
                 errors.append(f"Evaluation: {exc}")
             except cx_client.CxApiError as exc:
                 errors.append(f"Evaluation for {scan_id}: {exc}")
+                track(exc)
         completed_steps += 1
         report(completed_steps, total_steps, f"Loaded evaluation summary for {scan['project_name'] or project_id}.")
 
@@ -409,6 +456,45 @@ def _sync_project_management(sess: dict, progress=None) -> tuple[int, str]:
 # Project Management + Scan Health data already in SQLite.
 
 
+def _sync_ai_usage(sess: dict) -> tuple[int, str]:
+    base_url, token = sess["base_url"], sess["token"]
+    try:
+        payloads = {"info": cx_client.get_credits_info(base_url, token)}
+    except cx_client.CxEndpointUnavailable as exc:
+        db.replace_ai_usage({})
+        return 0, f"AI credits are not enabled on this tenant. {exc}"
+
+    today = datetime.now(timezone.utc).date()
+    fetches = [
+        ("license", "License status", lambda: cx_client.get_credits_license_status(base_url, token)),
+        ("burnrate", "Burn rate", lambda: cx_client.get_credits_burnrate(base_url, token)),
+        ("trend", "Usage over time", lambda: cx_client.get_credits_burnrate_trend(
+            base_url, token, today - timedelta(days=cx_client.CREDITS_PERIOD_DAYS), today)),
+        ("action_rates", "Action rates", lambda: cx_client.get_credits_action_rates(base_url, token)),
+        ("by_action", "Usage by action", lambda: cx_client.get_credits_by_action(base_url, token)),
+    ]
+    for group in cx_client.TOP_CONSUMER_GROUPS:
+        fetches.append((
+            f"top_consumers:{group}", f"Top consumers by {group}",
+            lambda group=group: cx_client.get_credits_top_consumers(base_url, token, group),
+        ))
+
+    errors = []
+    for kind, label, fetch in fetches:
+        try:
+            payloads[kind] = fetch()
+        except cx_client.CxApiError as exc:
+            # One view failing (e.g. a groupBy this tenant refuses) leaves
+            # that panel empty rather than losing the rest of the section.
+            errors.append(f"{label}: {exc}")
+
+    count = db.replace_ai_usage(payloads)
+    message = f"Synced {count} AI credit report(s) (usage covers the last {cx_client.CREDITS_PERIOD_DAYS} days)."
+    if errors:
+        message += " Not available: " + "; ".join(errors)
+    return count, message
+
+
 SECTIONS = [
     {
         "key": "global_configurations",
@@ -457,6 +543,12 @@ SECTIONS = [
         "label": "Stale Projects",
         "icon": _ICON_CLOCK,
         "sync_fn": None,  # derived from project_management + scan_health, no API call of its own
+    },
+    {
+        "key": "ai_usage",
+        "label": "AI Usage",
+        "icon": _ICON_SPARKLE,
+        "sync_fn": _sync_ai_usage,
     },
 ]
 

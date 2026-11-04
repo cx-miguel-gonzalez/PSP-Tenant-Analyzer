@@ -920,8 +920,11 @@ function initWorkflowPanel() {
   const title = document.getElementById("workflow-panel-title");
   const meta = document.getElementById("workflow-panel-meta");
   const body = document.getElementById("workflow-panel-body");
-  const triggers = document.querySelectorAll(".workflow-btn");
-  if (!panel || !backdrop || !closeBtn || !title || !meta || !body || !triggers.length) return;
+  // Delegated from the table rather than bound per button: the Scans
+  // Explorer detaches every row outside the current page, so a
+  // querySelectorAll here would only find the first page's buttons.
+  const table = document.getElementById("scans-table");
+  if (!panel || !backdrop || !closeBtn || !title || !meta || !body || !table) return;
 
   function openPanel() {
     backdrop.hidden = false;
@@ -988,25 +991,25 @@ function initWorkflowPanel() {
     body.appendChild(list);
   }
 
-  triggers.forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const scanId = btn.dataset.scanId;
-      title.textContent = "Scan Workflow";
-      meta.textContent = `Scan ${scanId}`;
-      renderMessage("Loading...");
-      openPanel();
-      try {
-        const resp = await fetch(`/scans/${encodeURIComponent(scanId)}/workflow`);
-        const data = await resp.json();
-        if (!resp.ok) {
-          renderMessage((data && data.error) || "Could not load the scan workflow.");
-          return;
-        }
-        renderSteps(data.steps);
-      } catch (err) {
-        renderMessage("Could not load the scan workflow.");
+  table.addEventListener("click", async (event) => {
+    const btn = event.target.closest(".workflow-btn");
+    if (!btn) return;
+    const scanId = btn.dataset.scanId;
+    title.textContent = "Scan Workflow";
+    meta.textContent = `Scan ${scanId}`;
+    renderMessage("Loading...");
+    openPanel();
+    try {
+      const resp = await fetch(`/scans/${encodeURIComponent(scanId)}/workflow`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        renderMessage((data && data.error) || "Could not load the scan workflow.");
+        return;
       }
-    });
+      renderSteps(data.steps);
+    } catch (err) {
+      renderMessage("Could not load the scan workflow.");
+    }
   });
 
   closeBtn.addEventListener("click", closePanel);
@@ -1260,8 +1263,32 @@ function initAnalyzerConfig() {
   });
 }
 
+function wireSyncErrorDialogs() {
+  document.querySelectorAll(".sync-error-btn").forEach((btn) => {
+    const dialog = document.getElementById(btn.dataset.dialogId);
+    if (!dialog || typeof dialog.showModal !== "function") return;
+    btn.addEventListener("click", () => dialog.showModal());
+    // A click on the backdrop lands on the <dialog> itself, not its content.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
+}
+
+// Inline onsubmit handlers are blocked by the CSP (script-src 'self'), so a
+// form asks for confirmation through a data-confirm attribute instead.
+function wireConfirmForms() {
+  document.querySelectorAll("form[data-confirm]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireSectionSync();
+  wireSyncErrorDialogs();
+  wireConfirmForms();
   wireSyncAll();
   wireCategoryToggles();
   initCompareSelection();

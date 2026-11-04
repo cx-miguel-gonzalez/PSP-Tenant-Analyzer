@@ -4,7 +4,22 @@
       <span class="badge badge-{{ sync_meta.status }}">{{ sync_meta.status }}</span>
       <span>{{ sync_meta.record_count }} record(s)</span>
       <span class="sync-strip-timestamp">last synced {{ sync_meta.last_synced_at[:19].replace('T', ' ') }} UTC</span>
-      {% if sync_meta.message %}<span class="sync-strip-message">{{ sync_meta.message }}</span>{% endif %}
+      {% set sync_summary, sync_errors = sync_meta | sync_message_parts %}
+      {% if sync_summary %}<span class="sync-strip-message">{{ sync_summary }}</span>{% endif %}
+      {% if sync_errors %}
+        <button type="button" class="btn btn-small sync-error-btn" data-dialog-id="sync-errors-{{ section_key }}" title="Show the full error details">
+          {{ sync_errors | length }} error{{ '' if sync_errors | length == 1 else 's' }}: <span class="sync-error-preview">{{ sync_errors[0] | truncate(80) }}</span>
+        </button>
+        <dialog id="sync-errors-{{ section_key }}" class="sync-error-dialog" aria-labelledby="sync-errors-{{ section_key }}-title">
+          <div class="detail-panel-header">
+            <h2 id="sync-errors-{{ section_key }}-title">Sync errors ({{ sync_errors | length }})</h2>
+            <form method="dialog"><button class="btn btn-outline btn-small" type="submit">Close</button></form>
+          </div>
+          <ol class="sync-error-list">
+            {% for error in sync_errors %}<li><pre>{{ error }}</pre></li>{% endfor %}
+          </ol>
+        </dialog>
+      {% endif %}
     {% else %}
       <span class="badge badge-idle">not yet synced</span>
     {% endif %}
