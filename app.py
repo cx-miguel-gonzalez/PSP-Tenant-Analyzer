@@ -370,14 +370,24 @@ import credential_store  # noqa: E402
 
 
 def _complete_login_and_remember(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key):
+    # Validated here, before the tenant name reaches the session, the tenant
+    # database path or the saved-credentials file.
+    try:
+        tenant = cx_client.validated_tenant(tenant)
+        base_url = cx_client.safe_endpoint(base_url)
+        iam_url = cx_client.safe_endpoint(iam_url)
+    except cx_client.CxApiError as exc:
+        flash(f"Authentication failed: {exc}", "error")
+        return redirect(url_for("login"))
+    if auth_method not in credential_store.AUTH_METHODS:
+        flash("Authentication failed: choose API Key or Client ID / Secret.", "error")
+        return redirect(url_for("login"))
     error = _establish_session(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key)
     if error is not None:
         flash(f"Authentication failed: {error}", "error")
         return redirect(url_for("login"))
     try:
-        credential_store.save(
-            tenant, cx_client.safe_endpoint(base_url), iam_url, auth_method, client_id, client_secret, api_key,
-        )
+        credential_store.save(tenant, base_url, iam_url, auth_method, client_id, client_secret, api_key)
     except OSError:
         app.logger.exception("Could not save credentials for tenant %s", tenant)
         flash("Signed in, but the credentials could not be saved for next time.", "error")

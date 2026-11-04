@@ -8,7 +8,10 @@ directory alone can't be decrypted. Without a usable key the feature is off
 and nothing is written.
 
 Secrets (API key / client secret) never leave this module except to sign
-in: profiles() returns them masked for display.
+in: profiles() returns only whether one is saved, never any part of it.
+Every profile read back from the file is re-validated (tenant name, URLs,
+auth method, id) before it is used or shown, so a tampered file can't
+inject markup or an unexpected tenant into the login page or session.
 """
 from __future__ import annotations
 
@@ -16,16 +19,20 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet, InvalidToken
 
+import cx_client
 import db
 
 logger = logging.getLogger(__name__)
 
 KEY_ENV_VAR = "CX_CREDENTIALS_KEY"
+AUTH_METHODS = ("api_key", "client_credentials")
+_PROFILE_ID_RE = re.compile(r"[0-9a-f]{16}")
 STORE_PATH = db.DATA_DIR / "saved_credentials.enc"
 
 _lock = threading.Lock()
@@ -58,12 +65,35 @@ def _load(fernet: Fernet) -> list[dict]:
     except FileNotFoundError:
         return []
     try:
-        return json.loads(fernet.decrypt(ciphertext)).get("profiles", [])
-    except (InvalidToken, ValueError):
+        stored = json.loads(fernet.decrypt(ciphertext)).get("profiles", [])
+    except (InvalidToken, ValueError, AttributeError):
         # A changed or wrong key: treat as empty rather than failing sign-in.
         # The next save overwrites the unreadable file.
         logger.warning("Saved credentials could not be decrypted with the current %s; ignoring them.", KEY_ENV_VAR)
         return []
+    valid = [p for p in (_validated(p) for p in stored if isinstance(p, dict)) if p is not None]
+    if len(valid) != len(stored):
+        logger.warning("Ignored %d saved sign-in(s) that failed validation.", len(stored) - len(valid))
+    return valid
+
+
+def _validated(profile: dict) -> dict | None:
+    """The profile with its identifying fields re-checked, or None if any of
+    them isn't what a successful sign-in would have saved."""
+    try:
+        tenant = cx_client.validated_tenant(profile.get("tenant"))
+        base_url = cx_client.safe_endpoint(profile.get("base_url"))
+        iam_url = cx_client.safe_endpoint(profile.get("iam_url"))
+    except cx_client.CxApiError:
+        return None
+    pid = profile_id(tenant, base_url, iam_url)
+    if profile.get("auth_method") not in AUTH_METHODS or not _PROFILE_ID_RE.fullmatch(str(profile.get("id"))) \
+            or profile.get("id") != pid:
+        return None
+    credentials = [profile.get(k) for k in ("client_id", "client_secret", "api_key")]
+    if any(c is not None and not isinstance(c, str) for c in credentials):
+        return None
+    return {**profile, "tenant": tenant, "base_url": base_url, "iam_url": iam_url}
 
 
 def _write(fernet: Fernet, profiles: list[dict]) -> None:
@@ -80,14 +110,9 @@ def _write(fernet: Fernet, profiles: list[dict]) -> None:
     os.replace(tmp_path, STORE_PATH)
 
 
-def _mask(secret: str | None) -> str:
-    if not secret:
-        return ""
-    return "••••" + secret[-4:] if len(secret) > 8 else "••••"
-
-
 def profiles() -> list[dict]:
-    """Saved tenants for display, most recently used first. Secrets masked."""
+    """Saved tenants for display, most recently used first. Carries no part
+    of the secret or the client ID -- only which auth method is saved."""
     fernet = _fernet()
     if fernet is None:
         return []
@@ -100,8 +125,6 @@ def profiles() -> list[dict]:
             "base_url": p["base_url"],
             "iam_url": p["iam_url"],
             "auth_method": p["auth_method"],
-            "client_id": p.get("client_id"),
-            "secret_hint": _mask(p.get("api_key") if p["auth_method"] == "api_key" else p.get("client_secret")),
             "saved_at": p.get("saved_at"),
         }
         for p in sorted(saved, key=lambda p: p.get("saved_at") or "", reverse=True)

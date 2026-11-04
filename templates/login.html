@@ -21,7 +21,7 @@
           <div class="saved-login-info">
             <span class="saved-login-tenant">{{ p.tenant }}</span>
             <span class="section-note">{{ p.base_url | replace('https://', '') }}</span>
-            <span class="section-note">{{ 'API key' if p.auth_method == 'api_key' else 'Client ' ~ p.client_id }} {{ p.secret_hint }}</span>
+            <span class="section-note">{{ 'API key' if p.auth_method == 'api_key' else 'Client ID / secret' }} saved</span>
           </div>
           <div class="saved-login-actions">
             <form action="{{ url_for('login_saved', profile_id=p.id) }}" method="post">

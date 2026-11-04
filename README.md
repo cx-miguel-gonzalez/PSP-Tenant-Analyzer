@@ -64,7 +64,7 @@ The container runs gunicorn with a single worker on purpose. Sign-ins and sync p
 
 ### Saved sign-ins
 
-Set `CX_CREDENTIALS_KEY` in `.env` and the login page remembers every tenant you sign in to through the form, so signing out and back in is one click. The tenant, URLs and API key or client secret are encrypted with that key (Fernet) into `data/saved_credentials.enc`, readable only by its owner. They're never written to the tenant databases, and the secret is never sent back to the browser (the page shows only its last four characters). The key stays outside the data folder, so a copy of `data/` alone can't be decrypted. Generate a key with:
+Set `CX_CREDENTIALS_KEY` in `.env` and the login page remembers every tenant you sign in to through the form, so signing out and back in is one click. The tenant, URLs and API key or client secret are encrypted with that key (Fernet) into `data/saved_credentials.enc`, readable only by its owner. They're never written to the tenant databases, and no part of the secret is ever sent back to the browser. Saved entries are re-validated whenever they're read, and any that fail are ignored. The key stays outside the data folder, so a copy of `data/` alone can't be decrypted. Generate a key with:
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

@@ -129,12 +129,18 @@ def safe_endpoint(url: str) -> str:
     return f"https://{netloc}{parsed.path.rstrip('/')}"
 
 
-def safe_tenant(tenant: str) -> str:
-    """A tenant (Keycloak realm) name, URL-encoded for use as a path segment."""
+def validated_tenant(tenant: str) -> str:
+    """A tenant (Keycloak realm) name, stripped and checked against the
+    realm-name pattern. Raises CxApiError for anything else."""
     tenant = (tenant or "").strip()
     if not _TENANT_RE.fullmatch(tenant) or ".." in tenant:
         raise CxApiError(f"Invalid tenant name: {tenant!r}.")
-    return quote(tenant, safe="")
+    return tenant
+
+
+def safe_tenant(tenant: str) -> str:
+    """A tenant (Keycloak realm) name, URL-encoded for use as a path segment."""
+    return quote(validated_tenant(tenant), safe="")
 
 
 def _api_key_exchange_audience() -> str:
