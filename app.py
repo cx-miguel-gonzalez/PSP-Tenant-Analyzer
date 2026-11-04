@@ -1,9 +1,9 @@
 """Checkmarx One Tenant Analyzer.
 
-Local Flask console: authenticate to a CxOne tenant, sync 8 review areas
+Local Flask console: authenticate to a CxOne tenant, sync 9 review areas
 (Global Configurations, Preset Management, Scan Health, Integrations,
 Feedback Apps and Profiles, Policies, Project/Application Management, Stale
-Projects) into a local SQLite cache, and browse a health/recommendations
+Projects, AI Usage) into a local SQLite cache, and browse a health/recommendations
 view. Every page renders from the local cache -- never live from the API.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import re
 import secrets
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import groupby
 from urllib.parse import urlparse
 
@@ -1209,6 +1209,123 @@ def _stale_projects_context():
     }
 
 
+@app.template_filter("credits")
+def _credits_filter(value):
+    """Credit amounts are whole numbers in practice but the burn rate isn't
+    (0.66/month), so whole values drop the decimals."""
+    if value is None:
+        return "—"
+    value = float(value)
+    return f"{value:,.0f}" if value.is_integer() else f"{value:,.2f}"
+
+
+def _credit_number(value) -> float | None:
+    # /api/credits returns amounts as strings ("398").
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ai_usage_trend(points, days: int) -> list[dict]:
+    """One entry per day for the whole period, so days with no usage show as
+    gaps in the chart instead of being skipped."""
+    credits_by_day = {}
+    for point in points if isinstance(points, list) else []:
+        if isinstance(point, dict) and point.get("date"):
+            credits_by_day[str(point["date"])[:10]] = _credit_number(point.get("totalCreditsConsumed")) or 0
+    end = datetime.utcnow().date()
+    return [
+        {"date": day.isoformat(), "credits": credits_by_day.get(day.isoformat(), 0)}
+        for day in (end - timedelta(days=offset) for offset in range(days, -1, -1))
+    ]
+
+
+def _ai_usage_consumers(payload) -> dict:
+    payload = payload if isinstance(payload, dict) else {}
+    actions = [str(a) for a in payload.get("topActions") or []]
+    rows = []
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        by_action = {}
+        for op in item.get("operations") or []:
+            if isinstance(op, dict) and op.get("name"):
+                by_action[str(op["name"])] = by_action.get(str(op["name"]), 0) + (_credit_number(op.get("credits")) or 0)
+                if op["name"] not in actions:
+                    actions.append(str(op["name"]))
+        rows.append({"name": item.get("name") or "Unknown", "by_action": by_action, "total": sum(by_action.values())})
+    rows.sort(key=lambda r: r["total"], reverse=True)
+    return {"actions": actions, "rows": rows, "max_total": max((r["total"] for r in rows), default=0) or 1}
+
+
+def _ai_usage_context():
+    usage = db.get_ai_usage()
+    info = usage.get("info") or {}
+    used = _credit_number(info.get("used"))
+    total = _credit_number(info.get("total"))
+    available = _credit_number(info.get("available"))
+    if available is None and total is not None and used is not None:
+        available = total - used
+
+    rates = [
+        {"name": r.get("display_name") or r.get("action_type"), "credits": _credit_number(r.get("credits_per_action"))}
+        for r in (usage.get("action_rates") or {}).get("rates") or []
+        if isinstance(r, dict) and r.get("is_active", True)
+    ]
+    # What the remaining balance buys if it were all spent on one action type.
+    for rate in rates:
+        rate["remaining"] = int(available // rate["credits"]) if available is not None and rate["credits"] else None
+
+    by_action_payload = usage.get("by_action") or {}
+    by_action = sorted(
+        (
+            {
+                "name": a.get("actionDisplayName") or "Unknown",
+                "count": a.get("count") or 0,
+                "credits_per_action": _credit_number(a.get("creditsPerAction")),
+                "credits": _credit_number(a.get("totalCredits")) or 0,
+                "pct": a.get("percentage") or 0,
+            }
+            for a in by_action_payload.get("actions") or [] if isinstance(a, dict)
+        ),
+        key=lambda a: a["credits"], reverse=True,
+    )
+
+    group = request.args.get("group", "user")
+    if group not in cx_client.TOP_CONSUMER_GROUPS:
+        group = "user"
+    trend = _ai_usage_trend(usage.get("trend"), cx_client.CREDITS_PERIOD_DAYS)
+    burnrate = usage.get("burnrate") or {}
+
+    return "ai_usage.html", {
+        "has_data": bool(info),
+        "used": used,
+        "total": total,
+        "available": available,
+        "used_pct": min(used / total * 100, 100) if used is not None and total else 0,
+        "actions_performed": info.get("actionsPerformed"),
+        "actions_available": info.get("actionsAvailable"),
+        "enforcement": info.get("enforcement") or {},
+        "license": usage.get("license") or {},
+        "burn_rate": _credit_number(burnrate.get("ratePerMonth")),
+        "depletion_date": burnrate.get("estimatedDepletionDate"),
+        "rates": rates,
+        "by_action": by_action,
+        "by_action_total": _credit_number(by_action_payload.get("totalCredits")),
+        "max_action_credits": max((a["credits"] for a in by_action), default=0) or 1,
+        "consumer_groups": cx_client.TOP_CONSUMER_GROUPS,
+        "consumer_group": group,
+        "consumers_synced": f"top_consumers:{group}" in usage,
+        "consumers": _ai_usage_consumers(usage.get(f"top_consumers:{group}")),
+        "trend": trend,
+        "trend_synced": "trend" in usage,
+        "trend_total": sum(p["credits"] for p in trend),
+        "trend_max": max((p["credits"] for p in trend), default=0) or 1,
+        "period_days": cx_client.CREDITS_PERIOD_DAYS,
+    }
+
+
 def _analyzer_config_context() -> list[dict]:
     look_back = health.look_back_days()
     return [
@@ -1265,6 +1382,7 @@ _SECTION_CONTEXT_BUILDERS = {
     "policies": _policies_context,
     "project_management": _project_management_context,
     "stale_projects": _stale_projects_context,
+    "ai_usage": _ai_usage_context,
 }
 
 

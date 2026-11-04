@@ -30,6 +30,7 @@ _SECTION_SOURCES = {
     "Policies": ("policies",),
     "ProjectsApplications": ("project_management",),
     "Stale Projects": ("project_management", "scan_health"),
+    "AI Usage": ("ai_usage",),
 }
 
 # Console section page -> the rule-set section whose violations it highlights.
@@ -42,6 +43,7 @@ PAGE_RULE_SECTION = {
     "policies": "Policies",
     "project_management": "ProjectsApplications",
     "stale_projects": "Stale Projects",
+    "ai_usage": "AI Usage",
 }
 
 _SOURCE_LABELS = {
@@ -52,6 +54,7 @@ _SOURCE_LABELS = {
     "feedback_profiles": "Feedback Apps",
     "policies": "Policies",
     "project_management": "Project/Application Management",
+    "ai_usage": "AI Usage",
 }
 
 _NOISY_PRESETS = ("ASA Premium", "Checkmarx Default", "All")
@@ -404,6 +407,81 @@ def _stale_projects(ctx):
     return results
 
 
+# ---------------------------------------------------------------------------
+# AI Usage -- the /api/credits/* reports cached by the AI Usage sync.
+# ---------------------------------------------------------------------------
+_NO_AI_CREDITS = {"not_evaluated": "AI credits are not enabled on this tenant"}
+
+
+def _number(value) -> float | None:
+    # /api/credits returns amounts as strings ("398").
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _credits_text(value: float) -> str:
+    return f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
+
+
+def _credits_remaining(in_range):
+    """in_range(pct) picks which band of the remaining-credits percentage the
+    rule covers, so the three Low Credits rules never fire together."""
+    def check(ctx):
+        info = ctx["ai_usage"].get("info")
+        if not info:
+            return _NO_AI_CREDITS
+        total, available = _number(info.get("total")), _number(info.get("available"))
+        if available is None and total is not None and _number(info.get("used")) is not None:
+            available = total - _number(info.get("used"))
+        if not total or available is None:
+            return {"not_evaluated": "The tenant reported no total credit allowance"}
+        pct = max(available, 0) / total * 100
+        if not in_range(pct):
+            return []
+        remaining = f"{_credits_text(available)} of {_credits_text(total)} ({pct:.1f}%)"
+        return {
+            "instances": [_i(f"{remaining} credits remain", None, {"Credits Remaining": remaining})],
+            "summary": f"{remaining} credits remain.",
+        }
+    return check
+
+
+def _majority_consumer(group_by: str, label: str):
+    """A single user/group whose credits are more than half of all credits
+    used in the same period (the by-action total, which every consumer's
+    usage is part of)."""
+    def check(ctx):
+        usage = ctx["ai_usage"]
+        if not usage.get("info"):
+            return _NO_AI_CREDITS
+        payload = usage.get(f"top_consumers:{group_by}")
+        if payload is None:
+            return {"not_evaluated": f"Top consumers by {group_by} weren't available from the tenant"}
+        consumers = []
+        for item in (payload.get("items") if isinstance(payload, dict) else None) or []:
+            if isinstance(item, dict):
+                credits = sum(_number(op.get("credits")) or 0 for op in item.get("operations") or [] if isinstance(op, dict))
+                consumers.append((item.get("name") or "Unknown", credits))
+        total = _number((usage.get("by_action") or {}).get("totalCredits"))
+        if total is None:
+            total = sum(credits for _, credits in consumers)
+        if not total:
+            return []
+        results = []
+        for name, credits in consumers:
+            share = credits / total * 100
+            if share > 50:
+                results.append(_i(
+                    f"{name} used {_credits_text(credits)} of {_credits_text(total)} credits ({share:.0f}%)",
+                    f"consumer:{group_by}:{name}",
+                    {label: name, "Credits Used": _credits_text(credits), "Share of All Credits": f"{share:.0f}%"},
+                ))
+        return results
+    return check
+
+
 # (rule-set section, ruleCheck text) -> evaluator. Rules in
 # analyzer_rules.json with no entry here are reported as "no evaluator".
 _EVALUATORS = {
@@ -446,6 +524,11 @@ _EVALUATORS = {
     ("ProjectsApplications", "Application has no projects associated"): _application_no_projects,
     ("ProjectsApplications", "Application has no authorization assignments"): _application_no_authorizations,
     ("Stale Projects", "Project has not been scanned in {look_back}"): _stale_projects,
+    ("AI Usage", "Low Credits Remaining: less than 5% of total credits remain"): _credits_remaining(lambda p: p < 5),
+    ("AI Usage", "Low Credits Remaining: between 5% and 10% of total credits remain"): _credits_remaining(lambda p: 5 <= p < 10),
+    ("AI Usage", "Low Credits Remaining: between 10% and 25% of total credits remain"): _credits_remaining(lambda p: 10 <= p < 25),
+    ("AI Usage", "High Consumption by User: a single user has consumed the majority of credits used"): _majority_consumer("user", "User"),
+    ("AI Usage", "High Consumption by Group: a single group has consumed the majority of credits used"): _majority_consumer("group", "Group"),
 }
 
 
@@ -470,6 +553,7 @@ def _build_context(policy_rule_summary) -> dict:
         "look_back_days": health.look_back_days(),
         "scan_status_counts": {row["status"]: row["count"] for row in db.scan_status_breakdown()},
         "top_errors": scan_errors.top_errors([dict(s) for s in db.failed_partial_scans()], db.scan_workflows_by_id()),
+        "ai_usage": db.get_ai_usage(),
     }
 
 
@@ -493,6 +577,11 @@ def _evaluate_section(section_name: str, rules: list[dict], ctx: dict, sync_meta
             skipped_unsynced += 1
             continue
         result = evaluator(ctx)
+        # An evaluator can also report that the synced data can't answer the
+        # rule (e.g. the tenant has no AI credits) instead of passing it.
+        if isinstance(result, dict) and result.get("not_evaluated"):
+            not_evaluated.append({"rule_check": rule["rule_check"], "reason": result["not_evaluated"]})
+            continue
         # An evaluator returns its instances, or {"instances", "summary"} when
         # the result also has a one-line headline (e.g. the scan failure rate).
         summary = result.get("summary") if isinstance(result, dict) else None

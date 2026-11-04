@@ -178,6 +178,11 @@ CREATE TABLE IF NOT EXISTS scan_workflows (
     fetched_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ai_usage (
+    kind TEXT PRIMARY KEY,
+    raw_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS analyzer_report (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     ran_at TEXT NOT NULL,
@@ -389,6 +394,7 @@ SECTION_KEYS = (
     "policies",
     "project_management",
     "stale_projects",
+    "ai_usage",
 )
 
 
@@ -449,6 +455,7 @@ _REPLACEABLE_TABLES = {
     "projects": 7,
     "applications": 4,
     "application_authorizations": 2,
+    "ai_usage": 2,
 }
 
 
@@ -1314,6 +1321,23 @@ def list_application_authorizations() -> dict[str, list]:
     with get_connection() as conn:
         rows = conn.execute("SELECT application_id, raw_json FROM application_authorizations").fetchall()
     return {str(row["application_id"]): json.loads(row["raw_json"] or "[]") for row in rows}
+
+
+# ---------------------------------------------------------------------------
+# AI Usage -- one row per /api/credits/* response, stored verbatim and keyed
+# by what it is ("info", "burnrate", "top_consumers:user", ...).
+# ---------------------------------------------------------------------------
+def replace_ai_usage(payloads: dict) -> int:
+    rows = [(kind, json.dumps(payload)) for kind, payload in payloads.items()]
+    with get_connection() as conn:
+        _replace_all(conn, "ai_usage", rows)
+    return len(rows)
+
+
+def get_ai_usage() -> dict:
+    with get_connection() as conn:
+        rows = conn.execute("SELECT kind, raw_json FROM ai_usage").fetchall()
+    return {row["kind"]: json.loads(row["raw_json"]) for row in rows}
 
 
 def orphaned_projects_count() -> int:

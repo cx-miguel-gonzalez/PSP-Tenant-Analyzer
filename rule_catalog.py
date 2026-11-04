@@ -28,6 +28,7 @@ SECTION_LABELS = {
     "Policies": "Policies",
     "ProjectsApplications": "Projects / Applications",
     "Stale Projects": "Stale Projects",
+    "AI Usage": "AI Usage",
 }
 
 # URL-safe ?tab= values for the Analyzer Config page's per-section tabs.
@@ -40,6 +41,7 @@ SECTION_SLUGS = {
     "Policies": "policies",
     "ProjectsApplications": "projects_applications",
     "Stale Projects": "stale_projects",
+    "AI Usage": "ai_usage",
 }
 
 

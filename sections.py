@@ -1,4 +1,4 @@
-"""Single source of truth for the console's 8 review sections: sidebar
+"""Single source of truth for the console's 9 review sections: sidebar
 entries, routes, and sync orchestration are all generated from this list
 instead of being hand-duplicated per section in app.py."""
 from __future__ import annotations
@@ -22,7 +22,8 @@ _ICON_TICKET = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 _ICON_SHIELD = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 _ICON_LAYERS = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 9 5-9 5-9-5 9-5Z" stroke-linejoin="round"/><path d="m3 13 9 5 9-5" stroke-linejoin="round"/></svg>"""
 _ICON_CLOCK = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
-_ICON_HOME = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 11 9-7 9 7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
+_ICON_SPARKLE = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z" stroke-linejoin="round"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" stroke-linejoin="round"/></svg>"""
+_ICON_HOME ="""<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 11 9-7 9 7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 _ICON_SLIDERS = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h6M14 6h6M4 12h10M18 12h2M4 18h4M12 18h8" stroke-linecap="round"/><circle cx="12" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></svg>"""
 
 
@@ -409,6 +410,45 @@ def _sync_project_management(sess: dict, progress=None) -> tuple[int, str]:
 # Project Management + Scan Health data already in SQLite.
 
 
+def _sync_ai_usage(sess: dict) -> tuple[int, str]:
+    base_url, token = sess["base_url"], sess["token"]
+    try:
+        payloads = {"info": cx_client.get_credits_info(base_url, token)}
+    except cx_client.CxEndpointUnavailable as exc:
+        db.replace_ai_usage({})
+        return 0, f"AI credits are not enabled on this tenant. {exc}"
+
+    today = datetime.now(timezone.utc).date()
+    fetches = [
+        ("license", "License status", lambda: cx_client.get_credits_license_status(base_url, token)),
+        ("burnrate", "Burn rate", lambda: cx_client.get_credits_burnrate(base_url, token)),
+        ("trend", "Usage over time", lambda: cx_client.get_credits_burnrate_trend(
+            base_url, token, today - timedelta(days=cx_client.CREDITS_PERIOD_DAYS), today)),
+        ("action_rates", "Action rates", lambda: cx_client.get_credits_action_rates(base_url, token)),
+        ("by_action", "Usage by action", lambda: cx_client.get_credits_by_action(base_url, token)),
+    ]
+    for group in cx_client.TOP_CONSUMER_GROUPS:
+        fetches.append((
+            f"top_consumers:{group}", f"Top consumers by {group}",
+            lambda group=group: cx_client.get_credits_top_consumers(base_url, token, group),
+        ))
+
+    errors = []
+    for kind, label, fetch in fetches:
+        try:
+            payloads[kind] = fetch()
+        except cx_client.CxApiError as exc:
+            # One view failing (e.g. a groupBy this tenant refuses) leaves
+            # that panel empty rather than losing the rest of the section.
+            errors.append(f"{label}: {exc}")
+
+    count = db.replace_ai_usage(payloads)
+    message = f"Synced {count} AI credit report(s) (usage covers the last {cx_client.CREDITS_PERIOD_DAYS} days)."
+    if errors:
+        message += " Not available: " + "; ".join(errors)
+    return count, message
+
+
 SECTIONS = [
     {
         "key": "global_configurations",
@@ -457,6 +497,12 @@ SECTIONS = [
         "label": "Stale Projects",
         "icon": _ICON_CLOCK,
         "sync_fn": None,  # derived from project_management + scan_health, no API call of its own
+    },
+    {
+        "key": "ai_usage",
+        "label": "AI Usage",
+        "icon": _ICON_SPARKLE,
+        "sync_fn": _sync_ai_usage,
     },
 ]
 

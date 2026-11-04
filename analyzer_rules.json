@@ -248,5 +248,37 @@
       "warningLevel": "Medium",
       "recommendation": "Scan the project to bring its results up to date, or delete it if it is no longer needed."
     }
+  ],
+  "AI Usage": [
+    {
+      "ruleCheck": "Low Credits Remaining: less than 5% of total credits remain",
+      "reasoning": "AI credits are almost used up; once they run out, AI features such as Triage and Remediation Assist stop working until more credits are added.",
+      "warningLevel": "High",
+      "recommendation": "Add AI credits now, and check the Top Consumers on the AI Usage page for usage that can be reduced in the meantime."
+    },
+    {
+      "ruleCheck": "Low Credits Remaining: between 5% and 10% of total credits remain",
+      "reasoning": "Less than a tenth of the AI credits are left, so AI features may stop working soon at the current burn rate.",
+      "warningLevel": "Medium",
+      "recommendation": "Plan to add AI credits before the estimated depletion date shown on the AI Usage page."
+    },
+    {
+      "ruleCheck": "Low Credits Remaining: between 10% and 25% of total credits remain",
+      "reasoning": "Most of the AI credits have been used; without planning, the tenant may run out before the license period ends.",
+      "warningLevel": "Low",
+      "recommendation": "Compare the burn rate with the license end date on the AI Usage page and decide whether more credits will be needed."
+    },
+    {
+      "ruleCheck": "High Consumption by User: a single user has consumed the majority of credits used",
+      "reasoning": "One user accounts for more than half of the AI credits used, so AI adoption depends on one person, or one user's usage may be crowding out everyone else's.",
+      "warningLevel": "High",
+      "recommendation": "Review that user's AI usage on the AI Usage page, and encourage wider adoption of AI features across the team, or set expectations for how credits should be shared."
+    },
+    {
+      "ruleCheck": "High Consumption by Group: a single group has consumed the majority of credits used",
+      "reasoning": "One group accounts for more than half of the AI credits used, so AI features are either concentrated in one team or that team's usage may exhaust the credits for everyone else.",
+      "warningLevel": "Medium",
+      "recommendation": "Review that group's AI usage on the AI Usage page, and plan how credits should be shared between teams."
+    }
   ]
 }
