@@ -17,6 +17,9 @@ from datetime import datetime
 from urllib.parse import quote, urlsplit
 
 import requests
+from http.cookiejar import DefaultCookiePolicy
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,44 @@ DEFAULT_IAM_URL = "https://iam.checkmarx.net"
 REQUEST_TIMEOUT = 30
 PAGE_SIZE = 100
 MAX_PAGES = 200  # safety cap so a misbehaving API can't loop forever
+
+# Retries for transient failures seen on large syncs: connection resets
+# (errno 104), brief DNS outages, timeouts, and 429/5xx throttling. Connect
+# errors are retried for every method (the request never reached the
+# server); read errors and retryable statuses only for GET/HEAD, so a
+# POST/PATCH/DELETE that may already have been applied is never re-sent.
+# Backoff is 0s, 2s, 4s, 8s... capped at 30s; a Retry-After header wins.
+# raise_on_status=False hands the last response back once retries run out,
+# so _request still reports its status and body as before.
+_RETRY = Retry(
+    total=5,
+    connect=5,
+    read=3,
+    status=4,
+    backoff_factor=1,
+    backoff_max=30,
+    status_forcelist=(429, 502, 503, 504),
+    allowed_methods=frozenset({"GET", "HEAD"}),
+    respect_retry_after_header=True,
+    raise_on_status=False,
+)
+
+
+def _build_http_session() -> requests.Session:
+    """One shared Session so requests reuse pooled keep-alive connections
+    instead of opening a new TLS connection per call. Cookies are refused:
+    every call authenticates with its own bearer token, and a shared jar
+    would otherwise carry one tenant's cookies into another tenant's calls."""
+    http = requests.Session()
+    http.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+    # Pool sized for gunicorn's 8 request threads plus concurrent sync threads.
+    adapter = HTTPAdapter(max_retries=_RETRY, pool_connections=4, pool_maxsize=16)
+    http.mount("https://", adapter)
+    http.mount("http://", adapter)
+    return http
+
+
+_HTTP = _build_http_session()
 
 
 class CxApiError(Exception):
@@ -137,7 +178,7 @@ def get_access_token(
         raise CxApiError(f"Unknown auth method: {method}")
 
     try:
-        resp = requests.post(token_url, data=data, timeout=REQUEST_TIMEOUT)
+        resp = _HTTP.post(token_url, data=data, timeout=REQUEST_TIMEOUT)
     except requests.RequestException as exc:
         raise CxApiError(f"Could not reach IAM endpoint: {exc}") from exc
 
@@ -165,7 +206,7 @@ def _request(
 ) -> requests.Response:
     url = f"{safe_endpoint(base_url)}{path}"
     try:
-        resp = requests.request(
+        resp = _HTTP.request(
             method, url, headers=_headers(token), timeout=REQUEST_TIMEOUT, **kwargs
         )
     except requests.RequestException as exc:

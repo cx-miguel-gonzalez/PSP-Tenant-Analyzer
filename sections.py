@@ -84,6 +84,26 @@ def _sync_preset_management(sess: dict, refresh_catalog: bool = False, progress=
     return count, f"Synced {count} preset(s){catalog_note}."
 
 
+# cx_client already retries each request through brief resets and DNS blips,
+# so this many back-to-back requests failing with no HTTP response at all
+# means the network or tenant is down. Per-scan loops stop there instead of
+# spending ~30s of retries on each of thousands of remaining scans.
+MAX_CONSECUTIVE_CONNECTION_FAILURES = 5
+
+
+def _is_connection_failure(exc: cx_client.CxApiError) -> bool:
+    """No status code means the request never got an HTTP response (reset,
+    DNS failure, timeout) -- as opposed to an API error like 403 or 500."""
+    return exc.status_code is None
+
+
+def _connection_stop_note(remaining: int, what: str) -> str:
+    return (
+        f"Stopped after {MAX_CONSECUTIVE_CONNECTION_FAILURES} consecutive connection failures: "
+        f"{remaining} {what}."
+    )
+
+
 def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     def report(current, total, message):
         if progress is not None:
@@ -125,18 +145,27 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     cached = db.cached_workflow_scan_ids()
     to_fetch = [str(s["id"]) for s in db.failed_partial_scans() if str(s["id"]) not in cached]
     unavailable = 0
+    connection_failures = 0
+    skipped = 0
     for i, scan_id in enumerate(to_fetch, start=1):
         report(i - 1, len(to_fetch), f"Fetching workflows of failed/partial scans... {i} of {len(to_fetch)}")
         try:
             db.save_scan_workflow(scan_id, cx_client.get_scan_workflow(sess["base_url"], sess["token"], scan_id))
-        except cx_client.CxApiError:
+            connection_failures = 0
+        except cx_client.CxApiError as exc:
             logger.exception("Failed to fetch workflow for scan %s", scan_id)
             unavailable += 1
+            connection_failures = connection_failures + 1 if _is_connection_failure(exc) else 0
+            if connection_failures >= MAX_CONSECUTIVE_CONNECTION_FAILURES:
+                skipped = len(to_fetch) - i
+                break
     message = f"Synced {count} scan(s) ({window_note})."
     if to_fetch:
-        message += f" Fetched {len(to_fetch) - unavailable} failed/partial scan workflow(s)."
+        message += f" Fetched {len(to_fetch) - unavailable - skipped} failed/partial scan workflow(s)."
     if unavailable:
         message += f" {unavailable} workflow(s) unavailable."
+    if skipped:
+        message += " Incomplete: " + _connection_stop_note(skipped, "workflow(s) not fetched (the next sync fetches them)")
     return count, message
 
 
@@ -239,8 +268,21 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
     errors = []
     details_available = True
     evaluations_available = True
+    connection_failures = 0
 
-    for scan in scans_to_sync:
+    def track(exc=None):
+        nonlocal connection_failures
+        if exc is not None and _is_connection_failure(exc):
+            connection_failures += 1
+        else:
+            connection_failures = 0
+
+    for scan_index, scan in enumerate(scans_to_sync, start=1):
+        if connection_failures >= MAX_CONSECUTIVE_CONNECTION_FAILURES:
+            errors.append(_connection_stop_note(
+                len(scans_to_sync) - scan_index + 1, "scan(s) not checked for violations or evaluations",
+            ))
+            break
         project_id = scan["project_id"]
         scan_id = scan["id"]
         context = {
@@ -273,11 +315,13 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
                             violations.append({**context, "raw": violation})
                     else:
                         violations.append({**context, "raw": policy_result})
+                track()
             except cx_client.CxEndpointUnavailable as exc:
                 details_available = False
                 errors.append(f"Violations: {exc}")
             except cx_client.CxApiError as exc:
                 errors.append(f"Violations for {scan_id}: {exc}")
+                track(exc)
             completed_steps += 1
             report(completed_steps, total_steps, f"Loaded violations for {scan['project_name'] or project_id}.")
         else:
@@ -291,11 +335,13 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
                     sess["base_url"], sess["token"], project_id, scan_id
                 )
                 evaluations.append({**context, "raw": evaluation})
+                track()
             except cx_client.CxEndpointUnavailable as exc:
                 evaluations_available = False
                 errors.append(f"Evaluation: {exc}")
             except cx_client.CxApiError as exc:
                 errors.append(f"Evaluation for {scan_id}: {exc}")
+                track(exc)
         completed_steps += 1
         report(completed_steps, total_steps, f"Loaded evaluation summary for {scan['project_name'] or project_id}.")
 
