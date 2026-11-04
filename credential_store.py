@@ -24,6 +24,7 @@ import threading
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet, InvalidToken
+from markupsafe import escape
 
 import cx_client
 import db
@@ -112,7 +113,11 @@ def _write(fernet: Fernet, profiles: list[dict]) -> None:
 
 def profiles() -> list[dict]:
     """Saved tenants for display, most recently used first. Carries no part
-    of the secret or the client ID -- only which auth method is saved."""
+    of the secret or the client ID -- only which auth method is saved.
+
+    Every value is HTML-encoded here (as Markup, so Jinja doesn't encode it
+    twice): the page never relies only on template autoescaping for data
+    read back from the file."""
     fernet = _fernet()
     if fernet is None:
         return []
@@ -120,12 +125,12 @@ def profiles() -> list[dict]:
         saved = _load(fernet)
     return [
         {
-            "id": p["id"],
-            "tenant": p["tenant"],
-            "base_url": p["base_url"],
-            "iam_url": p["iam_url"],
-            "auth_method": p["auth_method"],
-            "saved_at": p.get("saved_at"),
+            "id": escape(p["id"]),
+            "tenant": escape(p["tenant"]),
+            "base_url": escape(p["base_url"]),
+            "iam_url": escape(p["iam_url"]),
+            "auth_method": escape(p["auth_method"]),
+            "saved_at": escape(p.get("saved_at") or ""),
         }
         for p in sorted(saved, key=lambda p: p.get("saved_at") or "", reverse=True)
     ]
