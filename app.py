@@ -278,7 +278,7 @@ def _complete_login(base_url, iam_url, tenant, auth_method, client_id, client_se
 
 @app.before_request
 def require_login():
-    if request.endpoint in ("login", "login_env", "static"):
+    if request.endpoint in ("login", "login_env", "login_saved", "forget_saved_login", "static"):
         return None
     if _current_session() is None:
         return redirect(url_for("login"))
@@ -311,6 +311,9 @@ def login():
             default_base_url=cx_client.DEFAULT_BASE_URL,
             default_iam_url=cx_client.DEFAULT_IAM_URL,
             env_config=env_config,
+            saved_profiles=credential_store.profiles(),
+            credentials_enabled=credential_store.enabled(),
+            credentials_key_var=credential_store.KEY_ENV_VAR,
         )
 
     base_url = request.form.get("base_url", "").strip() or cx_client.DEFAULT_BASE_URL
@@ -325,7 +328,15 @@ def login():
         flash("Tenant name is required.", "error")
         return redirect(url_for("login"))
 
-    return _complete_login(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key)
+    # A blank secret field means "use the saved one" for a remembered tenant
+    # (the form only ever shows it masked).
+    saved = credential_store.get(credential_store.profile_id(tenant, base_url, iam_url))
+    if saved and saved["auth_method"] == auth_method:
+        api_key = api_key or saved.get("api_key")
+        client_id = client_id or saved.get("client_id")
+        client_secret = client_secret or saved.get("client_secret")
+
+    return _complete_login_and_remember(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key)
 
 
 @app.route("/login/env", methods=["POST"])
@@ -347,6 +358,50 @@ def logout():
         _SESSIONS.pop(sid, None)
     session["suppress_auto_login"] = True
     flash("Signed out.", "success")
+    return redirect(url_for("login"))
+
+
+# ---------------------------------------------------------------------------
+# Saved sign-ins -- every tenant signed in to through the form is remembered
+# in credential_store's encrypted file (not the tenant databases), so signing
+# out and back in doesn't mean retyping the tenant, URLs and secret.
+# ---------------------------------------------------------------------------
+import credential_store  # noqa: E402
+
+
+def _complete_login_and_remember(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key):
+    error = _establish_session(base_url, iam_url, tenant, auth_method, client_id, client_secret, api_key)
+    if error is not None:
+        flash(f"Authentication failed: {error}", "error")
+        return redirect(url_for("login"))
+    try:
+        credential_store.save(
+            tenant, cx_client.safe_endpoint(base_url), iam_url, auth_method, client_id, client_secret, api_key,
+        )
+    except OSError:
+        app.logger.exception("Could not save credentials for tenant %s", tenant)
+        flash("Signed in, but the credentials could not be saved for next time.", "error")
+        return redirect(url_for("dashboard"))
+    flash("Signed in.", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/login/saved/<profile_id>", methods=["POST"])
+def login_saved(profile_id):
+    saved = credential_store.get(profile_id)
+    if saved is None:
+        flash("That saved sign-in no longer exists.", "error")
+        return redirect(url_for("login"))
+    return _complete_login_and_remember(
+        saved["base_url"], saved["iam_url"], saved["tenant"], saved["auth_method"],
+        saved.get("client_id"), saved.get("client_secret"), saved.get("api_key"),
+    )
+
+
+@app.route("/login/saved/<profile_id>/forget", methods=["POST"])
+def forget_saved_login(profile_id):
+    if credential_store.forget(profile_id):
+        flash("Saved sign-in removed.", "success")
     return redirect(url_for("login"))
 
 

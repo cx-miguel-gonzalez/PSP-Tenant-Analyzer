@@ -749,7 +749,7 @@ tr.scan-row-low-duration td { color: var(--flash-success-text); }
   border-radius: 10px;
   padding: 2rem;
   width: 100%;
-  max-width: 380px;
+  max-width: 440px;
 }
 .login-brand { display: flex; align-items: center; gap: .75rem; margin-bottom: .5rem; }
 .login-brand h1 { font-size: 1.3rem; }
@@ -770,6 +770,18 @@ tr.scan-row-low-duration td { color: var(--flash-success-text); }
 .auth-method { border: none; padding: 0; margin: 0; flex-direction: row; gap: 1rem; align-items: center; }
 .radio-label { font-weight: 500; display: flex; align-items: center; gap: .35rem; }
 .login-divider { text-align: center; color: var(--cx-text-muted); font-size: .78rem; margin: 1.1rem 0; position: relative; }
+.saved-logins { margin-top: 1rem; }
+.saved-logins-title { font-size: .82rem; font-weight: 600; color: var(--cx-text-muted); margin: 0 0 .5rem; }
+.saved-login-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.saved-login {
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+  border: 1px solid var(--cx-border); border-radius: 8px; padding: .55rem .7rem;
+}
+.saved-login-info { display: flex; flex-direction: column; min-width: 0; }
+.saved-login-info .section-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-login-tenant { font-weight: 600; font-size: .9rem; overflow-wrap: anywhere; }
+.saved-login-actions { display: flex; gap: .4rem; flex-shrink: 0; }
+.saved-login-actions form { margin: 0; }
 
 /* ---------------------------------------------------------------------- */
 /* Preset Management                                                       */

@@ -12,6 +12,35 @@
     </div>
     <p class="login-subtitle">Sign in to your Checkmarx One tenant to sync and review its health.</p>
 
+    {% if saved_profiles %}
+    <div class="saved-logins">
+      <h2 class="saved-logins-title">Saved sign-ins</h2>
+      <ul class="saved-login-list">
+        {% for p in saved_profiles %}
+        <li class="saved-login">
+          <div class="saved-login-info">
+            <span class="saved-login-tenant">{{ p.tenant }}</span>
+            <span class="section-note">{{ p.base_url | replace('https://', '') }}</span>
+            <span class="section-note">{{ 'API key' if p.auth_method == 'api_key' else 'Client ' ~ p.client_id }} {{ p.secret_hint }}</span>
+          </div>
+          <div class="saved-login-actions">
+            <form action="{{ url_for('login_saved', profile_id=p.id) }}" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-accent btn-small" type="submit">Sign in</button>
+            </form>
+            <form action="{{ url_for('forget_saved_login', profile_id=p.id) }}" method="post"
+              data-confirm="Forget the saved sign-in for {{ p.tenant }}?">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-outline btn-small" type="submit" title="Remove these saved credentials">Forget</button>
+            </form>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="login-divider"><span>or sign in to another tenant</span></div>
+    {% endif %}
+
     {% if env_config %}
     <form action="{{ url_for('login_env') }}" method="post" class="login-env-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -49,6 +78,11 @@
       </label>
 
       <button class="btn btn-accent btn-block" type="submit">Sign in</button>
+      {% if credentials_enabled %}
+      <p class="section-note">Credentials are remembered (encrypted) after a successful sign-in.</p>
+      {% else %}
+      <p class="section-note">To remember credentials between sign-ins, set <code>{{ credentials_key_var }}</code> in <code>.env</code>.</p>
+      {% endif %}
     </form>
   </div>
 </div>
