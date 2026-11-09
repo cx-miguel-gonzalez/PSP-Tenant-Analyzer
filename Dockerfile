@@ -1,7 +1,7 @@
 # Alpine rather than Debian slim: the slim image carries glibc and tar CVEs
 # (e.g. CVE-2019-1010022, CVE-2005-2541) that Debian has no fixed package
 # for. Same Python 3.12 line as before, pinned to a patch release.
-FROM python:3.12.16-alpine3.24
+FROM python:3.15.0-alpine3.24
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
