@@ -229,7 +229,10 @@ def _request(
         # the response body (often the actual validation reason, e.g. a bad
         # query param) goes to the server log instead, so a failure is
         # diagnosable from /tmp without having to guess at the cause again.
-        logger.warning("%s %s failed (%s): %s", method, path, resp.status_code, resp.text[:2000])
+        # `path` can embed user-supplied ids (e.g. a preset id from a form), so
+        # encode CR/LF to stop forged log lines (CWE-117).
+        log_path = path.replace("\r", "\\r").replace("\n", "\\n")
+        logger.warning("%s %s failed (%s): %s", method, log_path, resp.status_code, resp.text[:2000])
         raise CxApiError(
             f"{method} {path} failed ({resp.status_code}).",
             status_code=resp.status_code,
