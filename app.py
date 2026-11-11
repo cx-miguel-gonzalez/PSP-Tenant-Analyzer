@@ -1274,6 +1274,68 @@ def _stale_projects_context():
     }
 
 
+# SCA Health pie: a project with any error counts as Errors (it may also have
+# warnings); Warnings is warnings only; No Manifests found no manifest files.
+# Projects not synced yet, or whose manifests were all skipped, aren't in it.
+_SCA_CATEGORIES = (
+    ("successful", "Successful", "var(--badge-done-text)"),
+    ("warnings", "Warnings only", "var(--badge-warning-text)"),
+    ("errors", "Errors", "var(--badge-error-text)"),
+    ("no_manifests", "No Manifests", "var(--cx-text-muted)"),
+)
+
+
+def _sca_category(resolution: dict) -> str | None:
+    if resolution["manifests"] == 0:
+        return "no_manifests"
+    if resolution["success_pct"] is None:
+        return None
+    if resolution["errors"]:
+        return "errors"
+    return "warnings" if resolution["warnings"] else "successful"
+
+
+def _sca_health_kpis(projects: list[dict]) -> dict:
+    counts = {key: 0 for key, _, _ in _SCA_CATEGORIES}
+    for project in projects:
+        if project["category"]:
+            counts[project["category"]] += 1
+    total = sum(counts.values())
+    slices, cursor = [], 0.0
+    for key, label, color in _SCA_CATEGORIES:
+        pct = counts[key] / total * 100 if total else 0
+        slices.append({"key": key, "label": label, "color": color, "count": counts[key],
+                       "pct": pct, "start": cursor, "end": cursor + pct})
+        cursor += pct
+    if total:
+        slices[-1]["end"] = 100.0
+    ranked = sorted(
+        (p for p in projects if p["resolution"]["errors"] or p["resolution"]["warnings"]),
+        key=lambda p: (-(p["resolution"]["errors"] + p["resolution"]["warnings"]),
+                       -p["resolution"]["errors"], (p["project_name"] or "").lower()),
+    )[:10]
+    max_problems = max((p["resolution"]["errors"] + p["resolution"]["warnings"] for p in ranked), default=0) or 1
+    return {
+        "pie_slices": slices, "pie_total": total,
+        "excluded": len(projects) - total,
+        "top_problem_projects": ranked, "max_problems": max_problems,
+    }
+
+
+def _sca_health_context():
+    look_back = health.look_back_days()
+    projects = db.sca_scan_projects(look_back)
+    for project in projects:
+        project["resolution"] = health.sca_resolution(project)
+        project["category"] = _sca_category(project["resolution"])
+    return "sca_health.html", {
+        "sca_projects": projects,
+        "kpis": _sca_health_kpis(projects),
+        "look_back_label": health.look_back_label(look_back),
+        "scan_meta": db.get_sync_meta("scan_health"),
+    }
+
+
 @app.template_filter("credits")
 def _credits_filter(value):
     """Credit amounts are whole numbers in practice but the burn rate isn't
@@ -1442,6 +1504,7 @@ _SECTION_CONTEXT_BUILDERS = {
     "global_configurations": _global_configurations_context,
     "preset_management": _preset_management_context,
     "scan_health": _scan_health_context,
+    "sca_health": _sca_health_context,
     "integrations": _integrations_context,
     "feedback_profiles": _feedback_profiles_context,
     "policies": _policies_context,
@@ -2002,7 +2065,7 @@ def _run_section_sync(sid: str, section_key: str, **extra_kwargs) -> None:
         return
 
     # Long-running syncs publish phase messages and, when possible, numeric progress.
-    if section_key in {"preset_management", "scan_health", "policies", "project_management"}:
+    if section_key in {"preset_management", "scan_health", "sca_health", "policies", "project_management"}:
         def _progress(current, total, message):
             status.update(current=current, total=total, message=message)
         extra_kwargs = {**extra_kwargs, "progress": _progress}

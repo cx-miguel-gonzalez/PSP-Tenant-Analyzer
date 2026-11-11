@@ -7,6 +7,7 @@ A local Flask console that authenticates to a Checkmarx One tenant, syncs 8 revi
 - Global Configurations
 - Preset Management
 - Scan Health
+- SCA Health
 - Integrations
 - Feedback Apps and Profiles
 - Policies

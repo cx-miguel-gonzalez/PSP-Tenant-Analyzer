@@ -19,7 +19,7 @@ import re
 import sqlite3
 import statistics
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("TENANT_ANALYZER_DATA_DIR") or (Path(__file__).parent / "data"))
@@ -175,6 +175,12 @@ CREATE TABLE IF NOT EXISTS application_authorizations (
 CREATE TABLE IF NOT EXISTS scan_workflows (
     scan_id TEXT PRIMARY KEY,
     raw_json TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sca_scan_info (
+    scan_id TEXT PRIMARY KEY,
+    raw_json TEXT,  -- NULL: SCA returned no resolution info for the scan
     fetched_at TEXT NOT NULL
 );
 
@@ -383,12 +389,20 @@ def _init_tenant_schema(conn: sqlite3.Connection) -> None:
                 "INSERT OR IGNORE INTO sync_meta (section_key, status) VALUES (?, 'idle')",
                 (key,),
             )
+        # Runs once per process, before any sync of this one can start, so a
+        # section still marked running was cut off by a restart -- its thread
+        # is gone and would otherwise read "running" forever.
+        conn.execute(
+            "UPDATE sync_meta SET status = 'error', message = ? WHERE status = 'running'",
+            ("Sync failed: interrupted because the app restarted. Sync again to finish it.",),
+        )
 
 
 SECTION_KEYS = (
     "global_configurations",
     "preset_management",
     "scan_health",
+    "sca_health",
     "integrations",
     "feedback_profiles",
     "policies",
@@ -1394,6 +1408,61 @@ def stale_projects(threshold_days: int = 90) -> list[dict]:
             }
         )
     return results
+
+
+# ---------------------------------------------------------------------------
+# SCA Health -- derived from the Scan Health scans, no sync of its own yet.
+# ---------------------------------------------------------------------------
+def sca_scan_projects(look_back_days: int = 0) -> list[dict]:
+    """Each project's most recent completed scan that ran the SCA engine,
+    within the Look Back (0 = every cached scan), newest first, with its
+    cached resolution info (`scan_info`: a dict, None if SCA had none, or
+    absent if not fetched yet)."""
+    cutoff = ""
+    if look_back_days and look_back_days > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=look_back_days)).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT project_id, project_name, id AS scan_id, created_at, status,
+                   i.scan_id IS NOT NULL AS info_fetched, i.raw_json AS info_json
+            FROM (
+                SELECT s.*, ROW_NUMBER() OVER (
+                    PARTITION BY s.project_id ORDER BY s.created_at DESC
+                ) AS rn
+                FROM scans s
+                WHERE s.project_id IS NOT NULL
+                  AND lower(s.status) = 'completed'
+                  AND s.created_at >= ?
+                  AND s.engines LIKE '%"sca"%'  -- a JSON list of engine names
+            ) latest
+            LEFT JOIN sca_scan_info i ON i.scan_id = latest.id
+            WHERE rn = 1
+            ORDER BY created_at DESC
+            """,
+            (cutoff,),
+        ).fetchall()
+    projects = []
+    for row in rows:
+        project = {k: row[k] for k in ("project_id", "project_name", "scan_id", "created_at", "status")}
+        if row["info_fetched"]:
+            project["scan_info"] = json.loads(row["info_json"]) if row["info_json"] else None
+        projects.append(project)
+    return projects
+
+
+def save_sca_scan_info(scan_id: str, info: dict | None) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO sca_scan_info (scan_id, raw_json, fetched_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(scan_id) DO UPDATE SET raw_json = excluded.raw_json, fetched_at = excluded.fetched_at",
+            (str(scan_id), json.dumps(info) if info is not None else None, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def prune_sca_scan_info() -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM sca_scan_info WHERE scan_id NOT IN (SELECT id FROM scans)")
 
 
 # ---------------------------------------------------------------------------

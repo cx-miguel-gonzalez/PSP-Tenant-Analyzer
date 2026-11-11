@@ -238,6 +238,25 @@ def _request(
     return resp
 
 
+def _json_body(resp: requests.Response, empty=None):
+    """The response's JSON, or `empty` when it has no body (e.g. 204 No
+    Content, which some policy-rule endpoints return for a policy without
+    rules for that engine). A non-JSON body becomes a CxApiError so the sync
+    records it as one error instead of failing outright."""
+    if resp.status_code == 204 or not resp.content.strip():
+        return empty
+    try:
+        return resp.json()
+    except ValueError as exc:
+        path = urlsplit(resp.url).path
+        logger.warning("%s returned a non-JSON body (%s): %s", path, resp.status_code, resp.text[:2000])
+        raise CxApiError(
+            f"{path} returned a non-JSON response ({resp.status_code}).",
+            status_code=resp.status_code,
+            body=resp.text,
+        ) from exc
+
+
 def _unwrap_page(data, list_keys=("data", "items", "results")) -> tuple[list, int | None]:
     """Returns (items, total_count) for either a bare list or a paginated
     envelope like {"<list_key>": [...], "totalCount": N}."""
@@ -439,14 +458,15 @@ def _parse_iso(value) -> datetime | None:
         return None
 
 
-def list_scans(base_url: str, token: str, limit: int | None = None, since=None) -> list:
+def list_scans(base_url: str, token: str, limit: int | None = None, since=None, on_page=None) -> list:
     """Returns scans newest-first. `limit` caps the total pulled. `since` (a
     datetime) stops paginating as soon as a page's scans are older than it --
     safe because the API is sorted by -created_at, so once one scan is older
     than the cutoff, every scan after it is too.
 
     Not bound by MAX_PAGES, so a large tenant isn't silently truncated; a page
-    that brings no new scan IDs (an API ignoring `offset`) ends the loop instead."""
+    that brings no new scan IDs (an API ignoring `offset`) ends the loop instead.
+    `on_page(scans_so_far)` is called after each page, for progress."""
     all_items = []
     seen_ids = set()
     offset = 0
@@ -479,6 +499,8 @@ def list_scans(base_url: str, token: str, limit: int | None = None, since=None) 
             all_items.extend(kept)
         else:
             all_items.extend(items)
+        if on_page is not None:
+            on_page(len(all_items))
 
         if not items or hit_cutoff:
             break
@@ -493,7 +515,7 @@ def list_scans(base_url: str, token: str, limit: int | None = None, since=None) 
     return all_items
 
 
-def get_sast_metadata(base_url: str, token: str, scan_ids: list) -> dict:
+def get_sast_metadata(base_url: str, token: str, scan_ids: list, on_batch=None) -> dict:
     """GET /api/sast-metadata?scan-ids=id1,id2,... -- confirmed via the `cx`
     CLI's SastIncrementalHTTPWrapper.GetSastMetadataByIDs (internal/
     wrappers/sast-metadata-http.go) and its SastMetadataModel: {"scans":
@@ -501,12 +523,13 @@ def get_sast_metadata(base_url: str, token: str, scan_ids: list) -> dict:
     of every scan id at once isn't safe) and merged into one
     {scan_id: loc} map. A scan absent from the response (too old, no
     completed SAST engine, etc.) just has no entry -- that's normal, not
-    an error."""
+    an error. `on_batch(done, total)` is called after each batch, for progress."""
     loc_by_id = {}
     # The API rejects more than ~50 ids per call (400 "Too many ids in url",
     # code 3102); 50 is the largest size confirmed against a live tenant.
     batch_size = 50
-    for i in range(0, len(scan_ids), batch_size):
+    batch_count = -(-len(scan_ids) // batch_size)
+    for batch_index, i in enumerate(range(0, len(scan_ids), batch_size), start=1):
         batch = [sid for sid in scan_ids[i:i + batch_size] if sid]
         if not batch:
             continue
@@ -520,6 +543,8 @@ def get_sast_metadata(base_url: str, token: str, scan_ids: list) -> dict:
             loc = scan.get("loc")
             if scan_id is not None and loc is not None:
                 loc_by_id[scan_id] = loc
+        if on_batch is not None:
+            on_batch(batch_index, batch_count)
     return loc_by_id
 
 
@@ -624,6 +649,34 @@ def list_feedback_profiles(base_url: str, token: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# SCA resolution -- the GraphQL query behind the SCA scan's "Scan Info" view
+# (captured from a browser session): per manifest, whether the dependency
+# resolver got full, partial or no results.
+# ---------------------------------------------------------------------------
+_SCA_SCAN_INFO_QUERY = (
+    "query ($scanId: UUID!) { scanInfo (scanId: $scanId) { hasWarnings, totalManifestsCount, "
+    "totalPackagesCount, identifiedBy { matchType, count }, manifests { dependenciesCount, "
+    "dependencyResolverStatus, manifestPath, message, resolvingModuleType }, deltaScan } }"
+)
+
+
+def get_sca_scan_info(base_url: str, token: str, scan_id: str) -> dict | None:
+    """The scan's SCA resolution info, or None when SCA has none for it."""
+    path = "/api/sca/graphql/graphql"
+    resp = _request(
+        "POST", base_url, token, path,
+        json={"query": _SCA_SCAN_INFO_QUERY, "variables": {"scanId": str(scan_id)}},
+    )
+    payload = _json_body(resp, empty={})
+    # GraphQL reports failures in the body with a 200.
+    if isinstance(payload, dict) and payload.get("errors"):
+        detail = "; ".join(str(e.get("message") or e) for e in payload["errors"] if e)
+        raise CxApiError(f"POST {path} returned an error: {detail}", status_code=resp.status_code, body=resp.text)
+    info = ((payload or {}).get("data") or {}).get("scanInfo")
+    return info if isinstance(info, dict) else None
+
+
+# ---------------------------------------------------------------------------
 # Policies -- endpoints and pagination from the tenant's Postman collection.
 # ---------------------------------------------------------------------------
 def list_policies(base_url: str, token: str) -> list:
@@ -636,7 +689,7 @@ def list_policies(base_url: str, token: str) -> list:
             params={"limit": page_size, "page": page},
         )
         items, total = _unwrap_page(
-            resp.json(), list_keys=("policies", "data", "items", "results")
+            _json_body(resp), list_keys=("policies", "data", "items", "results")
         )
         all_items.extend(items)
         if not items or len(items) < page_size:
@@ -661,7 +714,7 @@ def get_policy_engine_rules(
     if engine not in _POLICY_ENGINE_RULE_PATHS:
         raise ValueError(f"Unsupported policy rule engine: {engine}")
     path = _POLICY_ENGINE_RULE_PATHS[engine].format(policy_id=quote(str(policy_id), safe=""))
-    return _request("GET", base_url, token, path, best_effort=True).json()
+    return _json_body(_request("GET", base_url, token, path, best_effort=True), empty=[])
 
 
 def list_policy_violations(
@@ -674,7 +727,7 @@ def list_policy_violations(
         params={"projectId": project_id, "scanId": scan_id},
     )
     items, _ = _unwrap_page(
-        resp.json(), list_keys=("policies", "policyViolations", "violations", "data", "items", "results")
+        _json_body(resp), list_keys=("policies", "policyViolations", "violations", "data", "items", "results")
     )
     return items
 
@@ -688,7 +741,7 @@ def get_policy_evaluation(
         best_effort=True,
         params={"astProjectId": project_id, "scanId": scan_id},
     )
-    payload = resp.json()
+    payload = _json_body(resp, empty={})
     return payload if isinstance(payload, dict) else {"data": payload}
 
 

@@ -54,7 +54,7 @@
   <h2>Policy Violations</h2>
   <p class="section-note">Policy evaluations and violations are shown for all completed scans currently cached in Scan Health.</p>
   {% if violations %}
-    <table class="data-table">
+    <table class="data-table" id="violations-table">
       <thead>
         <tr><th>Scan</th><th>Project</th><th>Branch</th><th>Policy</th><th>Violation</th><th>Evaluation Summary</th><th>Evaluation Details</th></tr>
       </thead>
@@ -69,20 +69,22 @@
           <td>{{ violation_data.violationName or violation_data.ruleName or violation_data.name or violation_data.message or "Policy violation" }}</td>
           <td>{{ violation.summary }}</td>
           <td>
-            <details>
-              <summary>View evaluation details</summary>
+            <button type="button" class="btn btn-outline btn-small violation-details-btn"
+              data-template-id="violation-details-{{ loop.index }}"
+              data-title="{{ violation_data.violationName or violation_data.ruleName or violation_data.name or violation_data.message or 'Policy violation' }}"
+              data-meta="{{ violation.record.policy_name or violation_data.policyName or 'Policy' }} &middot; {{ violation.record.project_name or violation.record.project_id }} &middot; Scan {{ violation.record.scan_id }}">Evaluation Details</button>
+            <template id="violation-details-{{ loop.index }}">
+              <h3 class="detail-panel-subtitle">Evaluation</h3>
               {% if violation.details %}
                 <dl class="policy-violation-details">
                   {% for label, value in violation.details %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}
                 </dl>
               {% else %}
-                <span class="section-note">No query/finding fields returned</span>
+                <p class="section-note">No query/finding fields returned</p>
               {% endif %}
-              <details>
-                <summary>Full details</summary>
-                <pre class="raw-json">{{ violation.record.raw_json }}</pre>
-              </details>
-            </details>
+              <h3 class="detail-panel-subtitle">Full details</h3>
+              <pre class="raw-json">{{ violation.raw | tojson(indent=2) }}</pre>
+            </template>
           </td>
         </tr>
         {% endfor %}
@@ -94,6 +96,18 @@
     <p class="empty-state">No violation data cached yet. Sync Policies after syncing Scan Health.</p>
   {% endif %}
 </div>
+
+<div id="violation-panel-backdrop" class="panel-backdrop" hidden></div>
+<aside id="violation-panel" class="detail-panel" aria-hidden="true">
+  <div class="detail-panel-header">
+    <div>
+      <h2 id="violation-panel-title">Evaluation Details</h2>
+      <p id="violation-panel-meta" class="section-note"></p>
+    </div>
+    <button id="violation-panel-close" class="btn btn-outline btn-small" type="button">Close</button>
+  </div>
+  <div id="violation-panel-body" class="detail-panel-body"></div>
+</aside>
 
 {% else %}
 <div class="section-block">

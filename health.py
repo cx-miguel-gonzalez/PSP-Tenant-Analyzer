@@ -201,3 +201,79 @@ def section_findings(section_key: str) -> list[dict]:
     if rule is None:
         return []
     return rule(look_back_days())
+
+
+# dependencyResolverStatus values: FullResults is a clean resolution,
+# PartialResults resolved only some dependencies (a warning); anything else
+# (e.g. a failed resolution) counts as an error. ShouldNotBeResolved is a
+# manifest SCA skips on purpose, so it's left out of the percentage.
+_SCA_RESOLVED_FULL = "FullResults"
+_SCA_RESOLVED_PARTIAL = "PartialResults"
+_SCA_SKIPPED = "ShouldNotBeResolved"
+
+
+def sca_resolution(project: dict) -> dict:
+    """Manifest counts and an overall verdict for one project's SCA scan (a
+    db.sca_scan_projects row). Shared by the SCA Health page and the
+    analyzer's SCA Health rules, so both read the same percentage.
+    `success_pct` is the exact share of fully resolved manifests among those
+    SCA tried to resolve (None when there are none, or no resolution info);
+    `manifests` still counts every manifest found, skipped ones included."""
+    empty = {"manifests": None, "warnings": None, "errors": None, "skipped": None, "resolvable": None,
+             "manifest_list": [], "packages": None, "problems": [], "success_pct": None}
+    if "scan_info" not in project:
+        return {"label": "Not synced", "badge": "idle", **empty}
+    info = project["scan_info"]
+    if info is None:
+        return {"label": "No resolution info", "badge": "idle", **empty}
+    manifests = [m for m in info.get("manifests") or [] if isinstance(m, dict)]
+    total = info.get("totalManifestsCount")
+    if not isinstance(total, int):
+        total = len(manifests)
+    skipped = sum(1 for m in manifests if m.get("dependencyResolverStatus") == _SCA_SKIPPED)
+    resolvable = max(total - skipped, 0)
+    problems = [
+        m for m in manifests
+        if m.get("dependencyResolverStatus") not in (_SCA_RESOLVED_FULL, _SCA_SKIPPED)
+    ]
+    warnings = sum(1 for m in problems if m.get("dependencyResolverStatus") == _SCA_RESOLVED_PARTIAL)
+    errors = len(problems) - warnings
+    # Share of manifests fully resolved, rounded down so anything short of
+    # every manifest never reads as 100%. The colour still follows the worst
+    # manifest: any error is red, any partial result orange.
+    badge = "error" if errors else "warning" if warnings else "done"
+    success_pct = None
+    if resolvable:
+        resolved = max(resolvable - len(problems), 0)
+        success_pct = resolved * 100 / resolvable
+        label = f"{resolved * 100 // resolvable}% Successful"
+    elif total:
+        label, badge = "All skipped", "idle"
+    else:
+        label, badge = "No manifests", "idle"
+    return {
+        "label": label, "badge": badge, "manifests": total, "warnings": warnings, "errors": errors,
+        "skipped": skipped, "resolvable": resolvable, "success_pct": success_pct,
+        "manifest_list": [
+            {
+                "path": m.get("manifestPath") or "unknown manifest",
+                "status": m.get("dependencyResolverStatus") or "unknown status",
+                "severity": "done" if m.get("dependencyResolverStatus") == _SCA_RESOLVED_FULL
+                else "idle" if m.get("dependencyResolverStatus") == _SCA_SKIPPED
+                else "warning" if m.get("dependencyResolverStatus") == _SCA_RESOLVED_PARTIAL else "error",
+                "package_manager": m.get("resolvingModuleType") or "Unknown",
+                "dependencies": m.get("dependenciesCount"),
+                "message": m.get("message") or "",
+            }
+            for m in manifests
+        ],
+        "packages": info.get("totalPackagesCount"),
+        "problems": [
+            {
+                "path": m.get("manifestPath") or "unknown manifest",
+                "status": m.get("dependencyResolverStatus") or "unknown status",
+                "message": m.get("message") or "",
+            }
+            for m in problems
+        ],
+    }

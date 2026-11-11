@@ -25,6 +25,7 @@ _SECTION_SOURCES = {
     "Global Configuration": ("global_configurations",),
     "Preset Management": ("preset_management",),
     "Scan Health": ("scan_health",),
+    "SCA Health": ("scan_health", "sca_health"),
     "Integrations": ("integrations", "scan_health"),
     "Feedback Apps": ("feedback_profiles",),
     "Policies": ("policies",),
@@ -38,6 +39,7 @@ PAGE_RULE_SECTION = {
     "global_configurations": "Global Configuration",
     "preset_management": "Preset Management",
     "scan_health": "Scan Health",
+    "sca_health": "SCA Health",
     "integrations": "Integrations",
     "feedback_profiles": "Feedback Apps",
     "policies": "Policies",
@@ -51,6 +53,7 @@ _SOURCE_LABELS = {
     "preset_management": "Preset Management",
     "integrations": "Integrations",
     "scan_health": "Scan Health",
+    "sca_health": "SCA Health",
     "feedback_profiles": "Feedback Apps",
     "policies": "Policies",
     "project_management": "Project/Application Management",
@@ -392,6 +395,47 @@ def _scan_failure_rate(in_band):
 
 
 # ---------------------------------------------------------------------------
+# SCA Health -- each project's last completed SCA scan and its manifest
+# resolution (health.sca_resolution, the same numbers the page shows).
+# Projects whose resolution info isn't synced (or SCA had none) are skipped.
+# ---------------------------------------------------------------------------
+def _sca_resolution_rate(predicate):
+    def check(ctx):
+        results = []
+        for p in ctx["sca_projects"]:
+            r = health.sca_resolution(p)
+            if r["success_pct"] is None or not predicate(r["success_pct"]):
+                continue
+            name = p["project_name"] or p["project_id"]
+            resolved = r["resolvable"] - r["warnings"] - r["errors"]
+            results.append(_i(
+                f"{name} — {r['label']} ({resolved} of {r['resolvable']} resolvable manifest files)",
+                f"project:{p['project_id']}",
+                {
+                    "Project": name, "Resolution Health": r["label"],
+                    "Manifests": r["manifests"], "Skipped": r["skipped"], "Warnings": r["warnings"], "Errors": r["errors"],
+                    "Scan ID": p["scan_id"],
+                },
+            ))
+        return results
+    return check
+
+
+def _sca_no_manifests(ctx):
+    results = []
+    for p in ctx["sca_projects"]:
+        if health.sca_resolution(p)["manifests"] != 0:
+            continue
+        name = p["project_name"] or p["project_id"]
+        results.append(_i(
+            f"{name} — no manifest files found",
+            f"project:{p['project_id']}",
+            {"Project": name, "Scan ID": p["scan_id"], "Last SCA Scan": (p["created_at"] or "")[:10]},
+        ))
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Stale Projects
 # ---------------------------------------------------------------------------
 def _stale_projects(ctx):
@@ -507,6 +551,10 @@ _EVALUATORS = {
     ("Scan Health", "Scan failure rate is greater than 5%"): _scan_failure_rate(lambda r: r > 5),
     ("Scan Health", "Scan failure rate is between 2% and 5%"): _scan_failure_rate(lambda r: 2 <= r <= 5),
     ("Scan Health", "Scan failure rate is above 0% and below 2%"): _scan_failure_rate(lambda r: 0 < r < 2),
+    ("SCA Health", "Project has less than 70% of manifest files successfully resolved"): _sca_resolution_rate(lambda p: p < 70),
+    ("SCA Health", "Project has between 70% and 90% of manifest files successfully resolved"): _sca_resolution_rate(lambda p: 70 <= p < 90),
+    ("SCA Health", "Project has between 90% and 99% of manifest files successfully resolved"): _sca_resolution_rate(lambda p: 90 <= p < 100),
+    ("SCA Health", "Project has no manifest files"): _sca_no_manifests,
     ("Integrations", "Any connections using the standard GitHub Integration"): _standard_github_connections,
     ("Integrations", "Any custom scans are found"): _custom_scans,
     ("Integrations", "No CI/CD integrations or Source Control integrations"): _no_cicd_or_scm,
@@ -551,6 +599,7 @@ def _build_context(policy_rule_summary) -> dict:
         "applications": _raw_rows(db.list_applications()),
         "authorizations": db.list_application_authorizations(),
         "look_back_days": health.look_back_days(),
+        "sca_projects": db.sca_scan_projects(health.look_back_days()),
         "scan_status_counts": {row["status"]: row["count"] for row in db.scan_status_breakdown()},
         "top_errors": scan_errors.top_errors([dict(s) for s in db.failed_partial_scans()], db.scan_workflows_by_id()),
         "ai_usage": db.get_ai_usage(),
