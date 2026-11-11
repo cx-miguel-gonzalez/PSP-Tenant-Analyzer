@@ -23,6 +23,7 @@ _ICON_SHIELD = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 _ICON_LAYERS = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 9 5-9 5-9-5 9-5Z" stroke-linejoin="round"/><path d="m3 13 9 5 9-5" stroke-linejoin="round"/></svg>"""
 _ICON_CLOCK = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 _ICON_SPARKLE = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z" stroke-linejoin="round"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" stroke-linejoin="round"/></svg>"""
+_ICON_PACKAGE = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" stroke-linejoin="round"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9" stroke-linejoin="round"/></svg>"""
 _ICON_HOME ="""<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 11 9-7 9 7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 _ICON_SLIDERS = """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h6M14 6h6M4 12h10M18 12h2M4 18h4M12 18h8" stroke-linecap="round"/><circle cx="12" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></svg>"""
 
@@ -115,7 +116,13 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     if days_back and days_back > 0:
         since = datetime.now(timezone.utc) - timedelta(days=days_back)
         window_note = f"past {days_back} days"
-    scans = cx_client.list_scans(sess["base_url"], sess["token"], since=since)
+    # No total while listing: the API's totalCount is the whole tenant, not
+    # the look-back window, so the bar stays indeterminate with a running count.
+    report(0, 0, f"Loading scans ({window_note})...")
+    scans = cx_client.list_scans(
+        sess["base_url"], sess["token"], since=since,
+        on_page=lambda loaded: report(0, 0, f"Loading scans ({window_note})... {loaded} loaded"),
+    )
 
     # LOC is an enrichment from a separate batch call, not part of /api/scans
     # itself -- if it fails, still complete the sync (Scan Health doesn't
@@ -124,7 +131,12 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     scan_ids = [str(s.get("id")) for s in scans if s.get("id") is not None]
     if scan_ids:
         try:
-            loc_by_id = cx_client.get_sast_metadata(sess["base_url"], sess["token"], scan_ids)
+            loc_by_id = cx_client.get_sast_metadata(
+                sess["base_url"], sess["token"], scan_ids,
+                on_batch=lambda done, total: report(
+                    done, total, f"Loading lines of code for {len(scan_ids)} scan(s)... batch {done} of {total}"
+                ),
+            )
         except Exception:
             # Deliberately broad: LOC is a nice-to-have enrichment, not core
             # to Scan Health, so anything going wrong here (an HTTP error,
@@ -167,6 +179,47 @@ def _sync_scan_health(sess: dict, progress=None) -> tuple[int, str]:
     if skipped:
         message += " Incomplete: " + _connection_stop_note(skipped, "workflow(s) not fetched (the next sync fetches them)")
     return count, message
+
+
+def _sync_sca_health(sess: dict, progress=None) -> tuple[int, str]:
+    """Resolution info for each project's last completed SCA scan (projects
+    and scans come from the Scan Health sync). A completed scan's info never
+    changes, so only scans not already cached are fetched."""
+    def report(current, total, message):
+        if progress is not None:
+            progress(current, total, message)
+
+    db.prune_sca_scan_info()
+    projects = db.sca_scan_projects(health.look_back_days())
+    to_fetch = [p for p in projects if "scan_info" not in p]
+    failed = 0
+    skipped = 0
+    connection_failures = 0
+    for i, project in enumerate(to_fetch, start=1):
+        report(i - 1, len(to_fetch), f"Fetching SCA resolution info... {i} of {len(to_fetch)}")
+        try:
+            info = cx_client.get_sca_scan_info(sess["base_url"], sess["token"], project["scan_id"])
+            db.save_sca_scan_info(project["scan_id"], info)
+            connection_failures = 0
+        except cx_client.CxApiError as exc:
+            logger.exception("Failed to fetch SCA resolution info for scan %s", project["scan_id"])
+            failed += 1
+            connection_failures = connection_failures + 1 if _is_connection_failure(exc) else 0
+            if connection_failures >= MAX_CONSECUTIVE_CONNECTION_FAILURES:
+                skipped = len(to_fetch) - i
+                break
+    message = (
+        f"{len(projects)} project(s) with a completed SCA scan. "
+        f"Fetched resolution info for {len(to_fetch) - failed - skipped} new scan(s)."
+    )
+    if failed:
+        message += f" Incomplete: {failed} scan(s) failed to load (the next sync retries them)"
+        if skipped:
+            message += ": " + _connection_stop_note(skipped, "scan(s) not fetched")
+        message += "."
+    if not db.get_sync_meta("scan_health") or not db.get_sync_meta("scan_health")["last_synced_at"]:
+        message += " Sync Scan Health first: it supplies the scans."
+    return len(projects), message
 
 
 def _sync_integrations(sess: dict) -> tuple[int, str]:
@@ -513,6 +566,12 @@ SECTIONS = [
         "label": "Scan Health",
         "icon": _ICON_PULSE,
         "sync_fn": _sync_scan_health,
+    },
+    {
+        "key": "sca_health",
+        "label": "SCA Health",
+        "icon": _ICON_PACKAGE,
+        "sync_fn": _sync_sca_health,  # resolution info for the scans Scan Health synced
     },
     {
         "key": "integrations",

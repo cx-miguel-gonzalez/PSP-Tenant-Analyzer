@@ -697,6 +697,13 @@ button.stat-tile.stat-tile-active {
   cursor: pointer;
 }
 .legend-item:hover { background: var(--cx-card-bg); }
+.legend-item.is-active, .link-button.is-active { background: var(--cx-card-bg); font-weight: 700; }
+.sca-top-problems { font-size: .82rem; }
+.sca-top-problems td, .sca-top-problems th { padding: .3rem .45rem; }
+.hbar-track.sca-problem-track { display: flex; width: 100%; }
+.hbar-fill.sca-problem-errors { background: var(--badge-error-text); border-radius: 0; min-width: 0; }
+.hbar-fill.sca-problem-warnings { background: var(--badge-warning-text); border-radius: 0; min-width: 0; }
+.active-filter-note { display: inline-flex; align-items: center; gap: .4rem; font-size: .82rem; color: var(--cx-text-muted); }
 
 .bar-chart { display: flex; align-items: flex-end; gap: .65rem; height: 220px; padding-top: 1.5rem; }
 .bar-column {
@@ -819,6 +826,8 @@ tr.scan-row-low-duration td { color: var(--flash-success-text); }
 .table-filter-row th { padding: .35rem .45rem; }
 .project-management-filter { width: 100%; min-width: 0; padding: .35rem .4rem; font-size: .73rem; }
 .stale-project-filter { width: 100%; min-width: 0; padding: .35rem .4rem; font-size: .73rem; }
+.sca-health-filter { width: 100%; min-width: 0; padding: .35rem .4rem; font-size: .73rem; }
+#sca-health-table th:nth-child(n+4):nth-child(-n+7) { width: 6rem; }
 
 .field-label { display: flex; flex-direction: column; gap: .3rem; font-size: .82rem; font-weight: 600; color: var(--cx-text-muted); margin-bottom: .85rem; }
 .field-label input, .field-label textarea, .field-label select {
@@ -899,6 +908,13 @@ tr.scan-row-low-duration td { color: var(--flash-success-text); }
 }
 .detail-panel-header h2 { font-size: 1.05rem; margin: 0; }
 .detail-panel-body { padding: 1.1rem; }
+.detail-panel-subtitle { font-size: .85rem; margin: 0 0 .5rem; }
+.detail-panel-body .policy-violation-details { margin-bottom: 1.1rem; font-size: .85rem; }
+.detail-panel-body .raw-json { max-width: none; margin: 0; }
+.badge-button { border: 0; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.badge-button:hover { filter: brightness(.95); text-decoration: underline; }
+.workflow-step .raw-json { margin-top: .4rem; }
+.manifest-step-warning { background: var(--badge-warning-bg); border-color: var(--badge-warning-text); }
 .panel-language h3 { font-size: .95rem; margin: 1.1rem 0 .4rem; }
 .panel-language:first-child h3 { margin-top: 0; }
 .panel-category h4 { font-size: .82rem; color: var(--cx-text-muted); margin: .6rem 0 .25rem; }

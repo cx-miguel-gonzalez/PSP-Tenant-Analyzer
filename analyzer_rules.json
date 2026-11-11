@@ -137,6 +137,32 @@
       "recommendation": "Use the Top Error Categories on the Scan Health page to find the most common causes (e.g. repository credentials, missing branches, container images, custom query errors) and fix them at the source."
     }
   ],
+  "SCA Health": [
+    {
+      "ruleCheck": "Project has less than 70% of manifest files successfully resolved",
+      "reasoning": "Most of the project's dependencies are not fully resolved, so SCA results are likely missing many vulnerable packages.",
+      "warningLevel": "High",
+      "recommendation": "Review the project's manifest files in SCA Health and fix what stops them resolving (e.g. private registry credentials, lock files, or build configuration), so SCA reports every dependency."
+    },
+    {
+      "ruleCheck": "Project has between 70% and 90% of manifest files successfully resolved",
+      "reasoning": "A significant share of the project's manifest files are not fully resolved, so SCA results may be missing vulnerable packages.",
+      "warningLevel": "Medium",
+      "recommendation": "Review the project's manifest files in SCA Health and fix what stops them resolving (e.g. private registry credentials, lock files, or build configuration), so SCA reports every dependency."
+    },
+    {
+      "ruleCheck": "Project has between 90% and 99% of manifest files successfully resolved",
+      "reasoning": "Some of the project's manifest files are not fully resolved, so SCA results may be incomplete.",
+      "warningLevel": "Low",
+      "recommendation": "Review the project's manifest files in SCA Health and fix what stops them resolving (e.g. private registry credentials, lock files, or build configuration), so SCA reports every dependency."
+    },
+    {
+      "ruleCheck": "Project has no manifest files",
+      "reasoning": "SCA found no manifest files in the project's last scan, so it reports no open-source dependencies. The project may not use any, or its manifests may be excluded or unsupported.",
+      "warningLevel": "Low",
+      "recommendation": "Confirm whether the project has open-source dependencies. If it does, check that its manifest files are in the scanned source and not excluded by filters; if not, consider disabling SCA for the project."
+    }
+  ],
   "Integrations": [
     {
       "ruleCheck": "Any connections using the standard GitHub Integration",

@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}SCA Health - Tenant Analyzer{% endblock %}
+{% block content %}
+{% from "_analyzer_flag.html" import flag with context %}
+<div class="page-header">
+  <h1>{{ section.label }}</h1>
+</div>
+
+{% set sync_extra %}
+<span class="section-note">Look Back: <strong>{{ look_back_label }}</strong> (<a href="{{ url_for('dashboard') }}">change on Overview</a>)</span>
+{% endset %}
+{% include "_sync_strip.html" %}
+{% include "_findings.html" %}
+
+<p class="section-note">
+  Each project's last completed SCA scan in the Look Back, from the Scan Health data
+  (scan data: {% if scan_meta and scan_meta.last_synced_at %}synced {{ scan_meta.last_synced_at[:19].replace('T', ' ') }} UTC{% else %}not yet synced{% endif %}).
+  Sync here to fetch each scan's dependency resolution: a manifest with partial results is a warning, one that failed to resolve is an error.
+  Resolution Health is the share of manifest files that resolved fully, leaving out files SCA skips on purpose (ShouldNotBeResolved).
+</p>
+
+{% set k = kpis %}
+{% if sca_projects %}
+<div class="section-block">
+  <h2>SCA Health KPIs</h2>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <h3>Projects by Resolution Result</h3>
+      {% if k.pie_total %}
+      <div class="pie-chart-row">
+        <div class="pie-chart" style="background: conic-gradient({% for s in k.pie_slices %}{{ s.color }} {{ s.start }}% {{ s.end }}%{% if not loop.last %}, {% endif %}{% endfor %});">
+          <div class="pie-chart-hole">
+            <span class="pie-chart-total">{{ k.pie_total }}</span>
+            <span class="pie-chart-total-label">projects</span>
+          </div>
+        </div>
+        <ul class="pie-legend">
+          {% for s in k.pie_slices %}
+          <li>
+            <button type="button" class="legend-item sca-category-btn" data-category="{{ s.key }}" data-label="{{ s.label }}">
+              <span class="legend-swatch" style="background: {{ s.color }};"></span>{{ s.label }} &mdash; {{ s.count }} ({{ "%.0f"|format(s.pct) }}%)
+            </button>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <p class="section-note">
+        Click a result to filter the projects below. Errors includes projects that also have warnings.
+        {% if k.excluded %}{{ k.excluded }} project(s) not synced yet or with every manifest skipped aren't in the chart.{% endif %}
+      </p>
+      {% else %}
+        <p class="empty-state">No resolution info yet. Click "Sync Now" above.</p>
+      {% endif %}
+    </div>
+
+    <div class="kpi-card">
+      <h3>Top Projects by Manifest Problems <span class="section-note">(errors + warnings)</span></h3>
+      {% if k.top_problem_projects %}
+      <table class="data-table sca-top-problems">
+        <thead><tr><th>Project</th><th>Errors</th><th>Warnings</th><th class="hbar-col"></th></tr></thead>
+        <tbody>
+          {% for p in k.top_problem_projects %}
+          {% set r = p.resolution %}
+          <tr>
+            <td><button type="button" class="link-button sca-project-btn" data-project-id="{{ p.project_id }}" data-label="{{ p.project_name or p.project_id }}">{{ p.project_name or p.project_id }}</button></td>
+            <td>{{ r.errors }}</td>
+            <td>{{ r.warnings }}</td>
+            <td class="hbar-col">
+              <div class="hbar-track sca-problem-track" title="{{ r.errors }} error(s), {{ r.warnings }} warning(s)">
+                <div class="hbar-fill sca-problem-errors" style="width: {{ (r.errors / k.max_problems * 100) | round(1) }}%;"></div><div class="hbar-fill sca-problem-warnings" style="width: {{ (r.warnings / k.max_problems * 100) | round(1) }}%;"></div>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="section-note">Number of manifest files with errors or warnings in each project's last completed SCA scan. Click a project to show it below.</p>
+      {% else %}
+        <p class="empty-state">No project has manifest files with errors or warnings.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="section-block">
+  {% if sca_projects %}
+    <div class="toolbar-row">
+      <span class="section-note">{{ sca_projects | length }} project(s)</span>
+      <span id="sca-health-active-filter" class="active-filter-note" hidden>
+        Showing: <strong id="sca-health-active-filter-label"></strong>
+        <button type="button" id="sca-health-clear-filter" class="btn btn-outline btn-small">Clear</button>
+      </span>
+      <button type="button" id="sca-health-export-btn" class="btn btn-outline">Export CSV</button>
+    </div>
+    <table class="data-table" id="sca-health-table">
+      <thead>
+        <tr>
+          <th data-sort-key="0" class="sortable">Project Name</th>
+          <th data-sort-key="1" class="sortable">Last SCA Scan Date</th>
+          <th data-sort-key="2" class="sortable">Scan ID</th>
+          <th data-sort-key="3" class="sortable">Manifests</th>
+          <th data-sort-key="4" class="sortable" title="Manifest files SCA skips on purpose (ShouldNotBeResolved); not counted in Resolution Health">Skipped</th>
+          <th data-sort-key="5" class="sortable">Warnings</th>
+          <th data-sort-key="6" class="sortable">Errors</th>
+          <th data-sort-key="7" class="sortable">Resolution Health</th>
+        </tr>
+        <tr class="table-filter-row">
+          <th><input type="search" class="sca-health-filter" data-filter-column="0" aria-label="Filter by project name" placeholder="Filter project"></th>
+          <th><input type="search" class="sca-health-filter" data-filter-column="1" aria-label="Filter by last SCA scan date" placeholder="Filter date"></th>
+          <th><input type="search" class="sca-health-filter" data-filter-column="2" aria-label="Filter by scan ID" placeholder="Filter scan ID"></th>
+          <th><input type="search" class="sca-health-filter" data-filter-column="3" aria-label="Filter by manifest count" placeholder="Filter"></th>
+          <th><input type="search" class="sca-health-filter" data-filter-column="4" aria-label="Filter by skipped" placeholder="Filter"></th>
+          <th><input type="search" class="sca-health-filter" data-filter-column="5" aria-label="Filter by warnings" placeholder="Filter"></th>
+          <th><input type="search" class="sca-health-filter" data-filter-column="6" aria-label="Filter by errors" placeholder="Filter"></th>
+          <th><input type="search" class="sca-health-filter" data-filter-column="7" aria-label="Filter by resolution health" placeholder="Filter health"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in sca_projects %}
+        <tr{{ flag('project:' ~ p.project_id) }} data-category="{{ p.category or '' }}" data-project-id="{{ p.project_id }}">
+          <td>{{ p.project_name or p.project_id }}</td>
+          <td>{{ p.created_at[:19].replace('T', ' ') if p.created_at else "-" }}</td>
+          <td>{{ p.scan_id }}</td>
+          {% set r = p.resolution %}
+          <td>{{ r.manifests if r.manifests is not none else "-" }}</td>
+          <td>{{ r.skipped if r.skipped is not none else "-" }}</td>
+          <td>{{ r.warnings if r.warnings is not none else "-" }}</td>
+          <td>{{ r.errors if r.errors is not none else "-" }}</td>
+          <td>
+            {% if r.manifests is not none %}
+            <button type="button" class="badge badge-{{ r.badge }} badge-button sca-resolution-btn"
+              data-template-id="sca-resolution-{{ loop.index }}"
+              data-title="{{ p.project_name or p.project_id }}"
+              data-meta="Scan {{ p.scan_id }} &middot; {{ p.created_at[:19].replace('T', ' ') if p.created_at }} UTC"
+              title="Show the manifest files and their resolution">{{ r.label }}</button>
+            <template id="sca-resolution-{{ loop.index }}">
+              <p class="section-note">
+                {{ r.manifests }} manifest file(s){% if r.packages is not none %}, {{ r.packages }} package(s){% endif %}
+                &middot; {{ r.warnings }} with warnings &middot; {{ r.errors }} with errors
+                {% if r.skipped %}&middot; {{ r.skipped }} skipped (not counted in the percentage){% endif %}
+              </p>
+              {% if r.manifest_list %}
+              <ol class="workflow-step-list">
+                {% for m in r.manifest_list %}
+                <li class="workflow-step{{ ' workflow-step-error' if m.severity == 'error' else ' manifest-step-warning' if m.severity == 'warning' }}">
+                  <div class="workflow-step-head">
+                    <span class="workflow-step-source">{{ m.path }}</span>
+                    <span class="badge badge-{{ m.severity }}">{{ m.status }}</span>
+                  </div>
+                  <p class="workflow-step-info">Package manager: <strong>{{ m.package_manager }}</strong>{% if m.dependencies is not none %} &middot; {{ m.dependencies }} dependenc{{ 'y' if m.dependencies == 1 else 'ies' }}{% endif %}</p>
+                  {% if m.message %}<pre class="raw-json">{{ m.message }}</pre>{% endif %}
+                </li>
+                {% endfor %}
+              </ol>
+              {% else %}
+              <p class="section-note">No manifest files were found in this scan.</p>
+              {% endif %}
+            </template>
+            {% else %}
+            <span class="badge badge-{{ r.badge }}">{{ r.label }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="pagination-row">
+      <span id="sca-health-range-label" class="section-note"></span>
+      <div class="button-row">
+        <label class="field-label" style="margin-bottom: 0;">Page size
+          <select id="sca-health-page-size" class="select-input">
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <button type="button" id="sca-health-prev" class="btn btn-outline">&larr; Previous</button>
+        <button type="button" id="sca-health-next" class="btn btn-outline">Next &rarr;</button>
+      </div>
+    </div>
+
+    <div id="sca-resolution-panel-backdrop" class="panel-backdrop" hidden></div>
+    <aside id="sca-resolution-panel" class="detail-panel" aria-hidden="true">
+      <div class="detail-panel-header">
+        <div>
+          <h2 id="sca-resolution-panel-title">Resolution Health</h2>
+          <p id="sca-resolution-panel-meta" class="section-note"></p>
+        </div>
+        <button id="sca-resolution-panel-close" class="btn btn-outline btn-small" type="button">Close</button>
+      </div>
+      <div id="sca-resolution-panel-body" class="detail-panel-body"></div>
+    </aside>
+  {% elif scan_meta and scan_meta.last_synced_at %}
+    <p class="empty-state">No project has a completed SCA scan in the Look Back.</p>
+  {% else %}
+    <p class="empty-state">No scan data cached yet. Sync <a href="{{ url_for('section', key='scan_health') }}">Scan Health</a> first.</p>
+  {% endif %}
+</div>
+{% endblock %}

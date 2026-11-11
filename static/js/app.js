@@ -296,12 +296,14 @@ function initFilterableSortableTable(options) {
   const exportButton = exportButtonId ? document.getElementById(exportButtonId) : null;
 
   let page = 0;
+  // Optional extra row predicate set from outside the table (e.g. a KPI click).
+  let externalFilter = null;
 
   // Rows in CURRENT DOM order (reflects the active sort, since sorting
   // re-appends rows to tbody) that match every active filter.
   function getMatchingRows() {
     return Array.from(tbody.rows).filter((row) =>
-      filters.every((input) => {
+      (!externalFilter || externalFilter(row)) && filters.every((input) => {
         const term = input.value.trim().toLowerCase();
         const cell = row.cells[Number(input.dataset.filterColumn)];
         return !term || (cell && cell.textContent.toLowerCase().includes(term));
@@ -378,6 +380,13 @@ function initFilterableSortableTable(options) {
   }
 
   render();
+  return {
+    setExternalFilter(predicate) {
+      externalFilter = predicate;
+      page = 0;
+      render();
+    },
+  };
 }
 
 function initProjectManagementTables() {
@@ -413,6 +422,55 @@ function initStaleProjectsTable() {
     exportFilename: "stale-projects.csv",
     noMatchLabel: "No matching stale projects",
   });
+}
+
+function initScaHealthTable() {
+  const tableApi = initFilterableSortableTable({
+    tableId: "sca-health-table",
+    filterSelector: ".sca-health-filter",
+    pageSizeId: "sca-health-page-size",
+    prevId: "sca-health-prev",
+    nextId: "sca-health-next",
+    labelId: "sca-health-range-label",
+    exportButtonId: "sca-health-export-btn",
+    exportFilename: "sca-health.csv",
+    noMatchLabel: "No matching projects",
+  });
+  if (!tableApi) return;
+
+  // KPI clicks (a pie result or a top-10 project) filter the table; clicking
+  // the active one again, or Clear, shows every project.
+  const note = document.getElementById("sca-health-active-filter");
+  const noteLabel = document.getElementById("sca-health-active-filter-label");
+  const clearBtn = document.getElementById("sca-health-clear-filter");
+  const kpiButtons = document.querySelectorAll(".sca-category-btn, .sca-project-btn");
+  let activeKey = null;
+
+  function apply(key, label, predicate) {
+    activeKey = key;
+    tableApi.setExternalFilter(predicate);
+    kpiButtons.forEach((b) => b.classList.toggle("is-active", key !== null && b.dataset.filterKey === key));
+    if (note) note.hidden = key === null;
+    if (noteLabel) noteLabel.textContent = label || "";
+  }
+
+  kpiButtons.forEach((btn) => {
+    const isCategory = btn.classList.contains("sca-category-btn");
+    btn.dataset.filterKey = isCategory ? `category:${btn.dataset.category}` : `project:${btn.dataset.projectId}`;
+    btn.addEventListener("click", () => {
+      if (activeKey === btn.dataset.filterKey) {
+        apply(null, "", null);
+        return;
+      }
+      const predicate = isCategory
+        ? (row) => row.dataset.category === btn.dataset.category
+        : (row) => row.dataset.projectId === btn.dataset.projectId;
+      apply(btn.dataset.filterKey, btn.dataset.label, predicate);
+      const table = document.getElementById("sca-health-table");
+      if (table) table.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  if (clearBtn) clearBtn.addEventListener("click", () => apply(null, "", null));
 }
 
 function initPresetPanel() {
@@ -1019,6 +1077,63 @@ function initWorkflowPanel() {
   });
 }
 
+// Side panels whose content is rendered server-side into a <template> per
+// row; the row's button copies its template into the panel. Delegated from
+// the table, since paginated tables detach rows outside the current page.
+function initTemplatePanel({ prefix, tableId, buttonSelector, defaultTitle }) {
+  const panel = document.getElementById(`${prefix}-panel`);
+  const backdrop = document.getElementById(`${prefix}-panel-backdrop`);
+  const closeBtn = document.getElementById(`${prefix}-panel-close`);
+  const title = document.getElementById(`${prefix}-panel-title`);
+  const meta = document.getElementById(`${prefix}-panel-meta`);
+  const body = document.getElementById(`${prefix}-panel-body`);
+  const table = document.getElementById(tableId);
+  if (!panel || !backdrop || !closeBtn || !title || !meta || !body || !table) return;
+
+  function openPanel() {
+    backdrop.hidden = false;
+    panel.classList.add("panel-open");
+    panel.setAttribute("aria-hidden", "false");
+  }
+
+  function closePanel() {
+    panel.classList.remove("panel-open");
+    panel.setAttribute("aria-hidden", "true");
+    backdrop.hidden = true;
+  }
+
+  table.addEventListener("click", (event) => {
+    const btn = event.target.closest(buttonSelector);
+    if (!btn) return;
+    const template = document.getElementById(btn.dataset.templateId);
+    title.textContent = btn.dataset.title || defaultTitle;
+    meta.textContent = btn.dataset.meta || "";
+    while (body.firstChild) body.removeChild(body.firstChild);
+    if (template) body.appendChild(template.content.cloneNode(true));
+    openPanel();
+  });
+
+  closeBtn.addEventListener("click", closePanel);
+  backdrop.addEventListener("click", closePanel);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePanel();
+  });
+}
+
+function initViolationPanel() {
+  initTemplatePanel({
+    prefix: "violation", tableId: "violations-table",
+    buttonSelector: ".violation-details-btn", defaultTitle: "Evaluation Details",
+  });
+}
+
+function initScaResolutionPanel() {
+  initTemplatePanel({
+    prefix: "sca-resolution", tableId: "sca-health-table",
+    buttonSelector: ".sca-resolution-btn", defaultTitle: "Resolution Health",
+  });
+}
+
 // Known defaultRepositorySettings keys -> a readable label. Falls back to a
 // camelCase-to-Title-Case split for any key added on the tenant side later.
 const SCM_SETTING_LABELS = {
@@ -1296,6 +1411,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initFeedbackAppsTable();
   initProjectManagementTables();
   initStaleProjectsTable();
+  initScaHealthTable();
   initPresetPanel();
   wireSelectAll("combine-select-all", "diff-checkbox");
   wireSelectAll("update-select-all", "update-checkbox");
@@ -1304,6 +1420,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initScansExplorer();
   initKpiInteractions();
   initWorkflowPanel();
+  initViolationPanel();
+  initScaResolutionPanel();
   initScmOrgPanel();
   initSimplePagination("long-running-table", 10, "long-running-prev", "long-running-next", "long-running-range-label");
   initAnalyzerConfig();
