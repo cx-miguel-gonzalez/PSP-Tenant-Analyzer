@@ -256,6 +256,20 @@ def _sync_feedback_profiles(sess: dict) -> tuple[int, str]:
     return count, message
 
 
+def _evaluation_has_violations(evaluation: dict) -> bool:
+    return any(
+        isinstance(policy, dict) and policy.get("rulesViolated")
+        for policy in evaluation.get("policies") or []
+    )
+
+
+def _route_missing(exc: cx_client.CxEndpointUnavailable) -> bool:
+    """True when the 404 is for the endpoint itself (Spring's "No static
+    resource ..."), not for the scan/project asked about."""
+    body = exc.body or ""
+    return exc.status_code == 501 or "No static resource" in body or not body.lstrip().startswith("{")
+
+
 def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
     def report(current, total, message):
         if progress is not None:
@@ -344,43 +358,9 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
             "branch": scan["branch"],
             "scan_id": scan_id,
         }
-        if details_available:
-            report(completed_steps, total_steps, f"Loading violations for {scan['project_name'] or project_id}...")
-            try:
-                policy_results = cx_client.list_policy_violations(
-                    sess["base_url"], sess["token"], project_id, scan_id
-                )
-                for policy_result in policy_results:
-                    if not isinstance(policy_result, dict):
-                        continue
-                    violated_rules = policy_result.get("rulesViolated") or []
-                    if violated_rules:
-                        for rule in violated_rules:
-                            if not isinstance(rule, dict):
-                                rule = {"ruleName": str(rule)}
-                            violation = {
-                                "policyName": policy_result.get("policyName"),
-                                "description": policy_result.get("description"),
-                                "tags": policy_result.get("tags"),
-                                "breakBuild": policy_result.get("breakBuild"),
-                                **rule,
-                            }
-                            violations.append({**context, "raw": violation})
-                    else:
-                        violations.append({**context, "raw": policy_result})
-                track()
-            except cx_client.CxEndpointUnavailable as exc:
-                details_available = False
-                errors.append(f"Violations: {exc}")
-            except cx_client.CxApiError as exc:
-                errors.append(f"Violations for {scan_id}: {exc}")
-                track(exc)
-            completed_steps += 1
-            report(completed_steps, total_steps, f"Loaded violations for {scan['project_name'] or project_id}.")
-        else:
-            completed_steps += 1
-            report(completed_steps, total_steps, "Skipping detailed violations; endpoint is unavailable.")
-
+        # Evaluation first: it says whether the scan violated anything, so
+        # the detailed violations are only requested for scans that did.
+        evaluation = None
         if evaluations_available:
             report(completed_steps, total_steps, f"Loading evaluation summary for {scan['project_name'] or project_id}...")
             try:
@@ -397,6 +377,44 @@ def _sync_policies(sess: dict, progress=None) -> tuple[int, str]:
                 track(exc)
         completed_steps += 1
         report(completed_steps, total_steps, f"Loaded evaluation summary for {scan['project_name'] or project_id}.")
+
+        if details_available and (evaluation is None or _evaluation_has_violations(evaluation)):
+            report(completed_steps, total_steps, f"Loading violations for {scan['project_name'] or project_id}...")
+            try:
+                policy_results = cx_client.list_policy_violations(
+                    sess["base_url"], sess["token"], project_id, scan_id
+                )
+                for policy_result in policy_results:
+                    if not isinstance(policy_result, dict):
+                        continue
+                    if "rulesViolated" not in policy_result:
+                        violations.append({**context, "raw": policy_result})
+                        continue
+                    for rule in policy_result.get("rulesViolated") or []:
+                        if not isinstance(rule, dict):
+                            rule = {"ruleName": str(rule)}
+                        violation = {
+                            "policyName": policy_result.get("policyName"),
+                            "description": policy_result.get("description"),
+                            "tags": policy_result.get("tags"),
+                            "breakBuild": policy_result.get("breakBuild"),
+                            **rule,
+                        }
+                        violations.append({**context, "raw": violation})
+                track()
+            except cx_client.CxEndpointUnavailable as exc:
+                # A 404 for one scan ("project ID and scan ID do not match")
+                # means that scan has no violation report; only a missing
+                # route means the endpoint itself isn't on this tenant.
+                if _route_missing(exc):
+                    details_available = False
+                    errors.append(f"Violations: {exc}")
+                track()
+            except cx_client.CxApiError as exc:
+                errors.append(f"Violations for {scan_id}: {exc}")
+                track(exc)
+        completed_steps += 1
+        report(completed_steps, total_steps, f"Loaded violations for {scan['project_name'] or project_id}.")
 
     violation_count = db.replace_policy_violations(violations)
     evaluation_count = db.replace_policy_evaluations(evaluations)

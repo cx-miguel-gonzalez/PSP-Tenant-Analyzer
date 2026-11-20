@@ -79,8 +79,31 @@
                 <dl class="policy-violation-details">
                   {% for label, value in violation.details %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}
                 </dl>
-              {% else %}
+              {% elif not violation.packages %}
                 <p class="section-note">No query/finding fields returned</p>
+              {% endif %}
+              {% if violation.packages %}
+                <h3 class="detail-panel-subtitle">Packages ({{ violation.packages | length }})</h3>
+                <ol class="workflow-step-list">
+                  {% for package in violation.packages %}
+                  <li class="workflow-step">
+                    <div class="workflow-step-head">
+                      <span class="workflow-step-source">{{ package.name }}{% if package.version %} {{ package.version }}{% endif %}</span>
+                      {% if package.outdated %}<span class="badge badge-warning">Outdated</span>{% endif %}
+                    </div>
+                    {% if package.state %}<p class="workflow-step-info">State: <strong>{{ package.state }}</strong></p>{% endif %}
+                    {% for v in package.vulnerabilities %}
+                    <div class="violation-vulnerability">
+                      <div class="workflow-step-head">
+                        <strong>{{ v.cve }}</strong>
+                        <span class="badge badge-{{ 'error' if v.severity in ('CRITICAL', 'HIGH') else 'warning' if v.severity == 'MEDIUM' else 'idle' }}">{{ v.severity | title }}</span>
+                      </div>
+                      {% if v.description %}<p class="workflow-step-info">{{ v.description }}</p>{% endif %}
+                    </div>
+                    {% endfor %}
+                  </li>
+                  {% endfor %}
+                </ol>
               {% endif %}
               <h3 class="detail-panel-subtitle">Full details</h3>
               <pre class="raw-json">{{ violation.raw | tojson(indent=2) }}</pre>

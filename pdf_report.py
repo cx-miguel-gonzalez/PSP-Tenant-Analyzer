@@ -17,7 +17,9 @@ from reportlab.platypus import (
     Paragraph, Spacer, Table, TableStyle,
 )
 
-_LOGO = str(Path(__file__).parent / "static" / "img" / "checkmarx-mark.png")
+# Official Checkmarx wordmark (Cloud White colorway, for the Core Midnight bands).
+_LOGO = str(Path(__file__).parent / "static" / "img" / "brand" / "logo-cloud-white.png")
+_LOGO_RATIO = 10118 / 1311  # source artwork width / height
 
 # Same palette as static/css/style.css.
 NAVY = colors.HexColor("#140921")
@@ -94,11 +96,11 @@ def _gradient_band(c, x, y, w, h, steps=60):
         c.rect(x + w * i / steps, y, w / steps + 0.5, h, stroke=0, fill=1)
 
 
-def _logo_tile(c, x, y, size):
-    c.setFillColor(colors.white)
-    c.roundRect(x, y, size, size, size * 0.27, stroke=0, fill=1)
-    pad = size * 0.16
-    c.drawImage(_LOGO, x + pad, y + pad, size - 2 * pad, size - 2 * pad, mask="auto")
+def _draw_logo(c, x, y, width):
+    """Draw the wordmark with its bottom-left at (x, y); returns its height."""
+    height = width / _LOGO_RATIO
+    c.drawImage(_LOGO, x, y, width, height, mask="auto")
+    return height
 
 
 def _title_page(tenant, report, severity_counts):
@@ -110,10 +112,7 @@ def _title_page(tenant, report, severity_counts):
         c.circle(PAGE_W + 0.4 * inch, PAGE_H - 1.2 * inch, 3.4 * inch, stroke=0, fill=1)
         _gradient_band(c, 0, 0, PAGE_W, 0.22 * inch)
 
-        _logo_tile(c, MARGIN, PAGE_H - 1.75 * inch, 0.62 * inch)
-        c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 22)
-        c.drawString(MARGIN + 0.8 * inch, PAGE_H - 1.5 * inch, "Checkmarx")
+        _draw_logo(c, MARGIN, PAGE_H - 1.5 * inch, 2.1 * inch)
 
         top = PAGE_H * 0.58
         _gradient_band(c, MARGIN, top + 0.62 * inch, 1.1 * inch, 0.06 * inch)
@@ -161,10 +160,10 @@ def _content_page(tenant):
         c.setFillColor(NAVY)
         c.rect(0, PAGE_H - band_h, PAGE_W, band_h, stroke=0, fill=1)
         _gradient_band(c, 0, PAGE_H - band_h - 0.05 * inch, PAGE_W, 0.05 * inch)
-        _logo_tile(c, MARGIN, PAGE_H - band_h + 0.13 * inch, 0.29 * inch)
+        _draw_logo(c, MARGIN, PAGE_H - band_h + 0.21 * inch, 1.05 * inch)
         c.setFillColor(colors.white)
         c.setFont("Helvetica-Bold", 10)
-        c.drawString(MARGIN + 0.4 * inch, PAGE_H - band_h + 0.22 * inch, "Tenant Recommendations")
+        c.drawString(MARGIN + 1.25 * inch, PAGE_H - band_h + 0.22 * inch, "Tenant Recommendations")
         c.setFont("Helvetica", 9)
         c.drawRightString(PAGE_W - MARGIN, PAGE_H - band_h + 0.22 * inch, tenant)
 

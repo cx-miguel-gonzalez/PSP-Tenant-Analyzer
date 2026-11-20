@@ -16,6 +16,17 @@ function buildCsv(headers, rows) {
   return lines.join("\r\n");
 }
 
+// "stale_projects" -> "ps_na_miguel_gonzalez_stale_projects_13_11_2026.csv":
+// tenant first, today's date last. Kept in step with
+// export.tenant_export_filename() for the server-side downloads.
+function exportFilename(name, ext = "csv") {
+  const meta = document.querySelector('meta[name="tenant"]');
+  const tenant = (meta ? meta.content : "").replace(/[^A-Za-z0-9_-]/g, "") || "tenant";
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${tenant}_${name}_${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${now.getFullYear()}.${ext}`;
+}
+
 function downloadCsv(filename, csvText) {
   const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -281,7 +292,7 @@ function initFeedbackAppsTable() {
 function initFilterableSortableTable(options) {
   const {
     tableId, filterSelector, pageSizeId, prevId, nextId, labelId,
-    exportButtonId, exportFilename, defaultPageSize = "25", noMatchLabel = "No matching rows",
+    exportButtonId, exportName, defaultPageSize = "25", noMatchLabel = "No matching rows",
   } = options;
   const table = document.getElementById(tableId);
   if (!table) return;
@@ -375,7 +386,7 @@ function initFilterableSortableTable(options) {
       const exportRows = getMatchingRows().map((row) =>
         Array.from(row.cells, (cell) => cell.textContent.trim().replace(/\s+/g, " "))
       );
-      downloadCsv(exportFilename, buildCsv(exportHeaders, exportRows));
+      downloadCsv(exportFilename(exportName), buildCsv(exportHeaders, exportRows));
     });
   }
 
@@ -419,7 +430,7 @@ function initStaleProjectsTable() {
     nextId: "stale-projects-next",
     labelId: "stale-projects-range-label",
     exportButtonId: "stale-projects-export-btn",
-    exportFilename: "stale-projects.csv",
+    exportName: "stale_projects",
     noMatchLabel: "No matching stale projects",
   });
 }
@@ -433,7 +444,7 @@ function initScaHealthTable() {
     nextId: "sca-health-next",
     labelId: "sca-health-range-label",
     exportButtonId: "sca-health-export-btn",
-    exportFilename: "sca-health.csv",
+    exportName: "sca_health",
     noMatchLabel: "No matching projects",
   });
   if (!tableApi) return;
@@ -907,8 +918,7 @@ function initScansExplorer() {
           .slice(0, EXPORT_HEADERS.length)
           .map((cell) => cell.textContent.trim())
       );
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      downloadCsv(`scans-export-${stamp}.csv`, buildCsv(EXPORT_HEADERS, rows));
+      downloadCsv(exportFilename("scans"), buildCsv(EXPORT_HEADERS, rows));
     });
   }
 
