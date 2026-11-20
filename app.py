@@ -55,8 +55,8 @@ csrf = CSRFProtect(app)
 _CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",  # DM Sans is self-hosted under static/fonts
     "img-src 'self' data:",
     "object-src 'none'",
     "base-uri 'none'",
@@ -510,6 +510,69 @@ def tenant_recommendations():
     )
 
 
+def _date_cell(value):
+    return value[:19].replace("T", " ") if value else None
+
+
+def _export_table_csvs() -> list[tuple[str, str]]:
+    """(name, csv) for the Stale Projects, SCA Health, Scan Health scans and
+    Policy Violations tables, with the same columns and cell text as each
+    page's own table so a zipped CSV matches what that page shows."""
+    stale = _stale_projects_context()[1]["stale"]
+    sca = _sca_health_context()[1]["sca_projects"]
+    scans = db.list_scans_with_duration()
+    violations = _policies_context()[1]["violations"]
+    return [
+        ("stale_projects", export.table_to_csv(
+            ["Project ID", "Project", "Criticality", "Last Scan", "Days Since Last Scan", "Scan Count"],
+            [[p["id"], p["name"], p["criticality"], _date_cell(p["last_scan_at"]) or "never scanned",
+              p["days_since_last_scan"] if p["days_since_last_scan"] is not None else "-", p["scan_count"]]
+             for p in stale],
+        )),
+        ("sca_health", export.table_to_csv(
+            ["Project Name", "Last SCA Scan Date", "Scan ID", "Manifests", "Skipped", "Warnings", "Errors",
+             "Resolution Health"],
+            [[p["project_name"] or p["project_id"], _date_cell(p["created_at"]) or "-", p["scan_id"],
+              *(p["resolution"][k] if p["resolution"][k] is not None else "-"
+                for k in ("manifests", "skipped", "warnings", "errors")),
+              p["resolution"]["label"]]
+             for p in sca],
+        )),
+        ("scans", export.table_to_csv(
+            ["Scan ID", "Project", "Status", "Branch", "Origin", "Initiator", "Duration", "Created", "LOC"],
+            [[s["id"], s["project_name"] or s["project_id"], s["status"], s["branch"], s["origin"], s["initiator"],
+              _duration_label_filter(s["duration_minutes"]), _date_cell(s["created_at"]),
+              f"{s['loc']:,}" if s["loc"] is not None else "—"]
+             for s in scans],
+        )),
+        ("policy_violations", export.table_to_csv(
+            ["Scan", "Project", "Branch", "Policy", "Violation", "Evaluation Summary", "Evaluation Details"],
+            [[v["record"]["scan_id"], v["record"]["project_name"] or v["record"]["project_id"],
+              v["record"]["branch"] or "—", v["record"]["policy_name"] or v["raw"].get("policyName") or "—",
+              v["raw"].get("violationName") or v["raw"].get("ruleName") or v["raw"].get("name")
+              or v["raw"].get("message") or "Policy violation",
+              v["summary"], _policy_violation_text(v)]
+             for v in violations],
+        )),
+    ]
+
+
+@app.route("/recommendations/export.zip")
+def tenant_recommendations_export():
+    """The PDF report plus the CSV tables behind it, in one download."""
+    report, groups, severity_counts = _recommendation_data()
+    if report is None:
+        flash('Run "Analyze Tenant Configurations" before exporting recommendations.', "error")
+        return redirect(url_for("tenant_recommendations"))
+    tenant = _current_session()["tenant"]
+    pdf = pdf_report.build_recommendations_pdf(tenant, report, groups, severity_counts)
+    files = [(export.tenant_export_filename(tenant, "tenant_recommendations", "pdf"), pdf)]
+    files += [(export.tenant_export_filename(tenant, name), csv_text) for name, csv_text in _export_table_csvs()]
+    filename = export.tenant_export_filename(tenant, "tenant_recommendations", "zip")
+    return Response(export.zip_files(files), mimetype="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @app.route("/recommendations/export.pdf")
 def tenant_recommendations_pdf():
     report, groups, severity_counts = _recommendation_data()
@@ -560,9 +623,11 @@ _STATUS_PIE_COLORS = {
     "Canceled": "var(--cx-text-muted)",
 }
 _STATUS_PIE_DEFAULT_COLOR = "var(--cx-accent)"
+# Integration types are categories, not statuses, so they take the brand
+# chart series rather than the success/warning/error colors.
 _INTEGRATION_PIE_COLORS = [
-    "var(--badge-done-text)", "var(--badge-warning-text)",
-    "var(--cx-accent)", "var(--badge-error-text)",
+    "var(--cx-chart-1)", "var(--cx-chart-2)",
+    "var(--cx-neural-magenta)", "var(--cx-chart-3)",
 ]
 
 
@@ -702,6 +767,7 @@ def _policies_context():
             "raw": raw,
             "summary": _policy_evaluation_summary(evaluations_by_scan.get(str(row["scan_id"]))),
             "details": _policy_violation_details(raw),
+            "packages": _policy_violation_packages(raw),
         })
     for evaluation in evaluations:
         scan_id = str(evaluation["scan_id"])
@@ -732,6 +798,7 @@ def _policies_context():
                     "raw": raw,
                     "summary": _policy_evaluation_summary(evaluation_data),
                     "details": _policy_violation_details(raw),
+                    "packages": _policy_violation_packages(raw),
                 })
     project_incident_counts = {}
     rule_incident_counts = {}
@@ -833,6 +900,8 @@ def _policy_violation_details(raw):
         if isinstance(value, dict):
             for key, item in value.items():
                 normalized_key = "".join(char for char in str(key).lower() if char.isalnum())
+                if normalized_key == "packages":
+                    continue  # shown per package by _policy_violation_packages
                 label = detail_keys.get(normalized_key)
                 if label and isinstance(item, (str, int, float)) and str(item).strip():
                     pair = (label, str(item))
@@ -845,6 +914,50 @@ def _policy_violation_details(raw):
 
     visit(raw)
     return details
+
+
+_SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+
+def _policy_violation_packages(raw):
+    """SCA violations list the packages behind them, each with the
+    vulnerabilities that broke the rule (CVE, severity, description)."""
+    packages = []
+    for package in raw.get("packages") or []:
+        if not isinstance(package, dict):
+            continue
+        # The API repeats a vulnerability once per rule match, so one CVE
+        # can arrive several times for the same package.
+        unique = {}
+        for v in package.get("vulnerabilities") or []:
+            if not isinstance(v, dict):
+                continue
+            cve = v.get("cveName") or v.get("id") or "—"
+            unique.setdefault(cve, {
+                "cve": cve,
+                "severity": str(v.get("severity") or "").upper() or "—",
+                "description": v.get("description") or "",
+            })
+        vulnerabilities = sorted(unique.values(), key=lambda v: (_SEVERITY_ORDER.get(v["severity"], 9), v["cve"]))
+        packages.append({
+            "name": package.get("name") or package.get("id") or "Unknown package",
+            "version": package.get("version"),
+            "outdated": package.get("outdated"),
+            "state": str(package.get("packageState") or "").replace("_", " ").title() or None,
+            "vulnerabilities": vulnerabilities,
+        })
+    return packages
+
+
+def _policy_violation_text(violation):
+    """Evaluation Details as one CSV cell: the detail fields, then each
+    package with its vulnerabilities."""
+    parts = [f"{label}: {value}" for label, value in violation["details"]]
+    for package in violation["packages"]:
+        cves = ", ".join(f"{v['cve']} ({v['severity']})" for v in package["vulnerabilities"])
+        name = f"{package['name']} {package['version']}" if package["version"] else package["name"]
+        parts.append(f"{name}: {cves}" if cves else name)
+    return "; ".join(parts)
 
 
 def _policy_rule_summary(raw):
@@ -1706,7 +1819,7 @@ def presets_compare_export_csv():
 
     groups = diff.compare_presets(db.normalize_preset_queries(preset_a), db.normalize_preset_queries(preset_b))
     csv_text = export.diff_to_csv(groups, preset_a.get("name", str(a_id)), preset_b.get("name", str(b_id)))
-    filename = f"preset_diff_{a_id}_vs_{b_id}.csv"
+    filename = export.tenant_export_filename(_current_session()["tenant"], "preset_diff")
     return Response(
         csv_text, mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
@@ -1799,7 +1912,7 @@ def presets_compare_combine_export_csv():
         return redirect(url_for("section", key="preset_management"))
 
     csv_text = export.queries_to_csv(final_list)
-    filename = export.combined_export_filename(preset_name)
+    filename = export.combined_export_filename(_current_session()["tenant"], preset_name)
     return Response(
         csv_text, mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},

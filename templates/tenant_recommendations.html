@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header page-header-actions">
   <h1>Tenant Recommendations</h1>
-  {% if report %}<a class="btn btn-accent" href="{{ url_for('tenant_recommendations_pdf') }}">Export to PDF</a>{% endif %}
+  {% if report %}<a class="btn btn-accent" href="{{ url_for('tenant_recommendations_export') }}" title="PDF report plus Stale Projects, SCA Health, Scans and Policy Violations CSVs">Export (PDF + CSVs)</a>{% endif %}
 </div>
 
 {% if report %}

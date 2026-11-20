@@ -1,9 +1,11 @@
-"""CSV export of a preset diff, and JSON export of a single preset."""
+"""CSV export of a preset diff, JSON export of a single preset, and the
+Tenant Recommendations zip of the report plus its table CSVs."""
 from __future__ import annotations
 
 import csv
 import io
 import re
+import zipfile
 from datetime import datetime
 
 
@@ -64,7 +66,33 @@ def _sanitize_filename_component(text: str) -> str:
     return text or "Preset"
 
 
-def combined_export_filename(preset_name: str) -> str:
-    """e.g. "Miguel Premium" -> "MiguelPremiumUpdated28092026.csv" (today's date)."""
-    stamp = datetime.now().strftime("%d%m%Y")
-    return f"{_sanitize_filename_component(preset_name)}Updated{stamp}.csv"
+def tenant_export_filename(tenant: str, name: str, ext: str = "csv") -> str:
+    """Tenant first, today's date last, e.g. ("ps_na_miguel_gonzalez",
+    "stale_projects") -> "ps_na_miguel_gonzalez_stale_projects_13_11_2026.csv".
+    Kept in step with exportFilename() in static/js/app.js."""
+    stamp = datetime.now().strftime("%d_%m_%Y")
+    tenant_part = re.sub(r"[^A-Za-z0-9_-]", "", tenant or "") or "tenant"
+    return f"{tenant_part}_{name}_{stamp}.{ext}"
+
+
+def combined_export_filename(tenant: str, preset_name: str) -> str:
+    """e.g. "Miguel Premium" -> "<tenant>_MiguelPremiumUpdated_13_11_2026.csv"."""
+    return tenant_export_filename(tenant, f"{_sanitize_filename_component(preset_name)}Updated")
+
+
+def table_to_csv(headers: list[str], rows: list[list]) -> str:
+    """Same shape as the in-page Export CSV buttons (buildCsv in app.js)."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    writer.writerows(["" if cell is None else cell for cell in row] for row in rows)
+    return buffer.getvalue()
+
+
+def zip_files(files: list[tuple[str, str | bytes]]) -> bytes:
+    """(filename, content) pairs -> one zip archive."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in files:
+            archive.writestr(name, content)
+    return buffer.getvalue()

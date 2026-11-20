@@ -2,9 +2,11 @@
 {% block title %}Sign in - Tenant Analyzer{% endblock %}
 {% block bare_content %}
 <div class="login-shell">
+  <img class="login-element" src="{{ url_for('static', filename='img/brand/element-light-curve-up.svg') }}" alt="" aria-hidden="true">
   <div class="login-card">
     <div class="login-brand">
-      <span class="brand-mark"><img src="{{ url_for('static', filename='img/checkmarx-mark.png') }}" alt=""></span>
+      <img class="login-logo" src="{{ url_for('static', filename='img/brand/logo-quantum-violet.svg') }}" alt="Checkmarx">
+      <span class="login-eyebrow">Checkmarx One</span>
       <div class="login-brand-text">
         <h1>Tenant Analyzer</h1>
         <span class="brand-version">v{{ app_version }}</span>
